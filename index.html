@@ -1,0 +1,2259 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#667eea">
+    <title>Restaurant - Menu & Billing</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        /* POS Printer Format Styles */
+        @media print {
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                width: 80mm;
+                max-width: 80mm;
+                margin: 0 auto;
+            }
+            
+            .print-bill {
+                width: 80mm;
+                max-width: 80mm;
+                margin: 0;
+                padding: 5mm;
+            }
+            
+            .pos-bill {
+                width: 100%;
+                text-align: center;
+            }
+            
+            .pos-header {
+                margin-bottom: 10px;
+            }
+            
+            .pos-restaurant-name {
+                font-weight: bold;
+                font-size: 16px;
+                margin-bottom: 5px;
+                text-transform: uppercase;
+            }
+            
+        .pos-restaurant-address {
+            font-size: 10px;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+        
+        .pos-restaurant-gstin {
+            font-size: 10px;
+            margin-bottom: 3px;
+            line-height: 1.3;
+        }
+        
+        .pos-restaurant-fssai {
+            font-size: 10px;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+        
+        .pos-separator {
+                font-family: 'Courier New', monospace;
+                margin: 5px 0;
+                font-size: 11px;
+            }
+            
+            .pos-order-info {
+                font-size: 11px;
+                text-align: left;
+                margin: 5px 0;
+            }
+            
+            .pos-order-info div {
+                margin: 2px 0;
+            }
+            
+            .pos-items {
+                margin: 10px 0;
+                text-align: left;
+            }
+            
+            .pos-item-header {
+                display: flex;
+                justify-content: space-between;
+                font-weight: bold;
+                font-size: 11px;
+                margin-bottom: 5px;
+                border-bottom: 1px dashed #000;
+                padding-bottom: 3px;
+            }
+            
+            .pos-item-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 11px;
+                margin: 3px 0;
+                line-height: 1.4;
+            }
+            
+            .pos-item-name {
+                flex: 1;
+                text-align: left;
+                max-width: 45%;
+                word-wrap: break-word;
+            }
+            
+            .pos-item-qty {
+                width: 15%;
+                text-align: center;
+            }
+            
+            .pos-item-price {
+                width: 20%;
+                text-align: right;
+            }
+            
+            .pos-item-total {
+                width: 20%;
+                text-align: right;
+                font-weight: bold;
+            }
+            
+            .pos-footer {
+                margin-top: 10px;
+            }
+            
+            .pos-total {
+                font-weight: bold;
+                font-size: 14px;
+                margin: 10px 0;
+                text-align: right;
+            }
+            
+            .pos-thankyou {
+                font-size: 11px;
+                margin: 10px 0;
+                font-style: italic;
+            }
+            
+            /* Hide everything except print bill when printing */
+            body > *:not(.print-bill) {
+                display: none !important;
+            }
+            
+            .print-bill.hidden {
+                display: block !important;
+            }
+        }
+        
+        /* Screen preview styles */
+        .print-bill {
+            display: none;
+        }
+        
+        .print-bill:not(.hidden) {
+            display: block;
+            width: 80mm;
+            max-width: 80mm;
+            margin: 20px auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            background: white;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .pos-bill {
+            width: 100%;
+            text-align: center;
+        }
+        
+        .pos-restaurant-name {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        
+        .pos-restaurant-address {
+            font-size: 10px;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+        
+        .pos-restaurant-gstin {
+            font-size: 10px;
+            margin-bottom: 3px;
+            line-height: 1.3;
+        }
+        
+        .pos-restaurant-fssai {
+            font-size: 10px;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+        
+        .pos-separator {
+            font-family: 'Courier New', monospace;
+            margin: 5px 0;
+            font-size: 11px;
+        }
+        
+        .pos-order-info {
+            font-size: 11px;
+            text-align: left;
+            margin: 5px 0;
+        }
+        
+        .pos-order-info div {
+            margin: 2px 0;
+        }
+        
+        .pos-item-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #000;
+            padding-bottom: 3px;
+        }
+        
+        .pos-item-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            margin: 3px 0;
+            line-height: 1.4;
+        }
+        
+        .pos-item-name {
+            flex: 1;
+            text-align: left;
+            max-width: 45%;
+            word-wrap: break-word;
+        }
+        
+        .pos-item-qty {
+            width: 15%;
+            text-align: center;
+        }
+        
+        .pos-item-price {
+            width: 20%;
+            text-align: right;
+        }
+        
+        .pos-item-total {
+            width: 20%;
+            text-align: right;
+            font-weight: bold;
+        }
+        
+        .pos-total {
+            font-weight: bold;
+            font-size: 14px;
+            margin: 10px 0;
+            text-align: right;
+        }
+        
+        .pos-thankyou {
+            font-size: 11px;
+            margin: 10px 0;
+            font-style: italic;
+        }
+        
+        /* Menu Search Styles */
+        .menu-header-with-search {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .menu-header-with-search h2 {
+            margin: 0;
+        }
+        
+        .menu-search-container {
+            flex: 1;
+            max-width: 400px;
+            min-width: 200px;
+        }
+        
+        .menu-search-input {
+            width: 100%;
+            padding: 10px 18px;
+            font-size: 15px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+        
+        .menu-search-input:focus {
+            border-color: #4CAF50;
+        }
+        
+        .menu-search-input::placeholder {
+            color: #999;
+        }
+        
+        @media (max-width: 768px) {
+            .menu-header-with-search {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .menu-search-container {
+                max-width: 100%;
+            }
+        }
+        
+        /* Payment Method Styles */
+        .payment-methods {
+            margin: 20px 0;
+        }
+        
+        .payment-methods h3 {
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .payment-options {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .payment-method-btn {
+            flex: 1;
+            max-width: 150px;
+            padding: 20px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .payment-method-btn:hover {
+            border-color: #4CAF50;
+            background: #f0f8f0;
+            transform: translateY(-2px);
+        }
+        
+        .payment-method-btn:active {
+            transform: translateY(0);
+        }
+        
+        .payment-section {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .payment-amount {
+            text-align: center;
+        }
+        
+        .cash-payment-info {
+            padding: 20px;
+        }
+        
+        .qr-image {
+            max-width: 200px;
+            max-height: 200px;
+            width: auto;
+            height: auto;
+            margin: 0 auto;
+            display: block;
+        }
+        
+        /* Cart Tabs */
+        .cart-tabs {
+            display: flex;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 15px;
+        }
+        
+        .cart-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background: #f5f5f5;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .cart-tab.active {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .cart-tab:hover {
+            background: #e0e0e0;
+        }
+        
+        .cart-tab.active:hover {
+            background: #45a049;
+        }
+        
+        .previous-bills-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .previous-bill-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .previous-bill-item:hover {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+        }
+        
+        .previous-bill-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .previous-bill-item-id {
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .previous-bill-item-date {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .previous-bill-item-total {
+            font-size: 16px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .previous-bill-item-payment {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        /* Cart Height and Scroll */
+        .cart-panel {
+            max-height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .cart-header {
+            padding: 3px 10px;
+            margin: 0;
+        }
+        
+        .cart-header h2 {
+            margin: 0;
+            font-size: 16px;
+            padding: 0;
+            line-height: 1.2;
+        }
+        
+        .cart-tabs {
+            margin-top: 3px;
+            margin-bottom: 5px;
+        }
+        
+        .cart-tab {
+            padding: 6px;
+            font-size: 13px;
+        }
+        
+        .cart-tab-content {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        .cart-tab-content.active {
+            display: flex;
+        }
+        
+        .cart-items {
+            height: 180px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex-shrink: 0;
+        }
+        
+        .cart-item {
+            padding: 6px 8px;
+            margin-bottom: 3px;
+            line-height: 1.3;
+            min-height: 50px;
+            box-sizing: border-box;
+        }
+        
+        .cart-item h4 {
+            margin: 0 0 2px 0;
+            font-size: 13px;
+            line-height: 1.3;
+        }
+        
+        .cart-item p {
+            margin: 0;
+            font-size: 11px;
+            line-height: 1.3;
+        }
+        
+        .cart-footer {
+            flex-shrink: 0;
+            padding: 6px 0;
+            margin-top: auto;
+        }
+        
+        .cart-total {
+            margin-bottom: 5px;
+            font-size: 14px;
+            line-height: 1.3;
+        }
+        
+        .cart-actions {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        
+        .cart-actions .btn {
+            padding: 6px 10px;
+            font-size: 12px;
+            line-height: 1.3;
+        }
+        
+        .previous-bills-list {
+            height: 180px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex-shrink: 0;
+        }
+        
+        /* Print Bill Preview Modal - Reduced Height with Scroll */
+        #printBillPreviewModal .modal-content {
+            max-height: 500px;
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+        }
+        
+        #printBillPreviewModal .modal-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        #printBillPreviewContent {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            max-height: 350px;
+            padding: 10px;
+        }
+        
+        #printBillPreviewModal .bill-preview-actions {
+            flex-shrink: 0;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        
+        #billPreviewTotal {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        /* Previous Bill Preview Modal - Same styling as Print Bill Preview */
+        #previousBillModal .modal-content {
+            max-height: 500px;
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+        }
+        
+        #previousBillModal .modal-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        #previousBillContent {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            max-height: 350px;
+            padding: 10px;
+        }
+        
+        #previousBillModal .bill-preview-actions {
+            flex-shrink: 0;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        
+        #previousBillTotal {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        /* Management Tabs */
+        .management-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+        
+        .management-tab {
+            padding: 12px 24px;
+            background: #f5f5f5;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            color: #666;
+            transition: all 0.3s ease;
+            border-radius: 5px 5px 0 0;
+        }
+        
+        .management-tab:hover {
+            background: #e8e8e8;
+            color: #333;
+        }
+        
+        .management-tab.active {
+            background: #667eea;
+            color: white;
+            border-bottom-color: #667eea;
+        }
+        
+        .management-tab-content {
+            display: none;
+        }
+        
+        .management-tab-content.active {
+            display: block;
+        }
+        
+        .stock-management {
+            padding: 20px;
+        }
+        
+        .stock-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .stock-header h3 {
+            margin: 0;
+        }
+        
+        .stock-actions-header {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .stock-search-filter-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            position: relative;
+        }
+        
+        .stock-search-container {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .stock-search-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .stock-search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .stock-filter-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stock-color-filter {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+            min-width: 200px;
+        }
+        
+        .stock-color-filter:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .export-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .export-dropdown-content {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            min-width: 180px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            z-index: 1000;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        
+        .export-dropdown-content.hidden {
+            display: none;
+        }
+        
+        .export-option {
+            display: block;
+            width: 100%;
+            padding: 12px 15px;
+            text-align: left;
+            border: none;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .export-option:hover {
+            background: #f0f0f0;
+        }
+        
+        .export-option:first-child {
+            border-bottom: 1px solid #eee;
+        }
+        
+        .stock-items-list {
+            margin-top: 20px;
+        }
+        
+        .stock-management.fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 3000;
+            background: white;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .stock-item-card {
+            background: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        
+        .stock-item-card.stock-warning {
+            background: #fff9c4;
+            border: 2px solid #ffc107;
+        }
+        
+        .stock-item-card.stock-danger {
+            background: #ffebee;
+            border: 2px solid #f44336;
+        }
+        
+        .stock-item-info h4 {
+            margin: 0 0 8px 0;
+            color: #333;
+        }
+        
+        .stock-item-details {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #666;
+            flex-wrap: wrap;
+        }
+        
+        .stock-item-details span {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stock-item-details strong {
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .stock-low {
+            color: #f44336;
+            font-weight: bold;
+        }
+        
+        .stock-danger-text {
+            color: #d32f2f;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .stock-actions {
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+        
+        .stock-update-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            align-items: flex-start;
+        }
+        
+        .stock-update-group label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #666;
+        }
+        
+        .stock-actions input {
+            width: 100px;
+            padding: 8px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            text-align: center;
+        }
+        
+        .stock-update-group .btn {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 13px;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #da190b;
+        }
+        
+        /* Cancel Bill Section */
+        .cancel-bill-content {
+            padding: 20px;
+        }
+        
+        .cancel-bill-results {
+            margin-top: 20px;
+        }
+        
+        .cancel-bill-results table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .cancel-bill-results th,
+        .cancel-bill-results td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        
+        .cancel-bill-results th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        
+        .cancel-bill-results tr:hover {
+            background-color: #f9f9f9;
+        }
+        
+        .transaction-details {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        
+        .transaction-history-section {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #ddd;
+        }
+        
+        .transaction-history-section h3 {
+            margin-bottom: 15px;
+        }
+        
+        #cancelBillTransactionHistoryContent {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        /* Image Edit Modal Styles */
+        #imageCanvas {
+            background: #f5f5f5;
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .crop-overlay {
+            position: absolute;
+            border: 2px dashed #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+            pointer-events: none;
+        }
+        
+        .crop-handle {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #4CAF50;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: move;
+            pointer-events: all;
+        }
+        
+        .canvas-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        #imageEditModal .form-input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        
+        #imageEditModal h3 {
+            color: #667eea;
+            font-size: 1.2rem;
+        }
+        
+        /* Password Toggle Button Styles */
+        .toggle-password-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            color: #666;
+            padding: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }
+        
+        .toggle-password-btn:hover {
+            color: #333;
+        }
+        
+        .toggle-password-btn:focus {
+            outline: none;
+        }
+        
+        /* Hamburger Menu Styles */
+        .hamburger-menu-container {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .hamburger-btn {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            width: 30px;
+            height: 30px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            z-index: 10;
+        }
+        
+        .hamburger-btn span {
+            width: 25px;
+            height: 3px;
+            background: #667eea;
+            border-radius: 3px;
+            transition: all 0.3s ease;
+            transform-origin: center;
+        }
+        
+        .hamburger-btn:hover span {
+            background: #5568d3;
+        }
+        
+        .hamburger-btn.active span:nth-child(1) {
+            transform: rotate(45deg) translate(8px, 8px);
+        }
+        
+        .hamburger-btn.active span:nth-child(2) {
+            opacity: 0;
+        }
+        
+        .hamburger-btn.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(7px, -7px);
+        }
+        
+        .hamburger-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            min-width: 180px;
+            z-index: 1000;
+            padding: 8px 0;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .hamburger-menu:not(.hidden) {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: all;
+        }
+        
+        .hamburger-menu-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 12px 20px;
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            color: #333;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .hamburger-menu-item:hover {
+            background: #f5f5f5;
+        }
+        
+        .hamburger-menu-item:first-child {
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        
+        .hamburger-menu-item:last-child {
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h1 id="restaurantTitle">Restaurant Menu</h1>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div id="headerCartTotalDisplay" style="display: none; font-size: 40px; font-weight: bold; color: #f44336; line-height: 40px;">
+                    Total : ₹<span id="headerCartTotal">0.00</span>
+                </div>
+                <div id="userInfoDisplay" style="display: none; padding: 8px 15px; background: #f0f0f0; border-radius: 5px; font-size: 14px;">
+                    <span style="color: #666;">Logged in as: </span>
+                    <strong id="headerUserName" style="color: #4CAF50;"></strong>
+                    <span style="color: #999; margin-left: 10px;">(<span id="headerUserRole"></span>)</span>
+                </div>
+            </div>
+        </div>
+        <nav>
+            <button id="loginBtn" class="nav-btn">Login</button>
+            <div class="hamburger-menu-container">
+                <button id="hamburgerBtn" class="hamburger-btn" aria-label="Menu">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <div id="hamburgerMenu" class="hamburger-menu hidden">
+                    <button id="adminBtn" class="nav-btn hamburger-menu-item">Admin</button>
+                    <button id="menuManagementBtn" class="nav-btn hamburger-menu-item">Manage Menu</button>
+                    <button id="salesReportBtn" class="nav-btn hamburger-menu-item">Sales Report</button>
+                    <button id="cancelBillBtn" class="nav-btn hamburger-menu-item">Cancel Bill</button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main>
+        <!-- Menu Section -->
+        <section id="menuSection" class="menu-section">
+            <div class="menu-header-with-search">
+                <h2>Our Menu</h2>
+                <div class="menu-search-container">
+                    <input type="text" id="menuSearchInput" placeholder="Search menu items..." class="menu-search-input">
+                </div>
+            </div>
+            <div id="menuGrid" class="menu-grid">
+                <!-- Menu items will be dynamically loaded here -->
+            </div>
+        </section>
+
+        <!-- Cart Section -->
+        <aside id="cartPanel" class="cart-panel outer-panel">
+            <div class="cart-header-modern">
+                <div class="cart-header-title">
+                    <span class="cart-icon">🛒</span>
+                    <h2>Your Cart</h2>
+                </div>
+                <div class="cart-items-count" id="cartItemsCount">0</div>
+            </div>
+            
+            <div class="cart-tabs-modern">
+                <button class="cart-tab-modern active" id="currentCartTab">
+                    <span class="tab-icon">🛍️</span>
+                    <span>Current Cart</span>
+                </button>
+                <button class="cart-tab-modern" id="previousBillsTab">
+                    <span class="tab-icon">📋</span>
+                    <span>Previous Bills</span>
+                </button>
+            </div>
+            
+            <div id="currentCartContent" class="cart-tab-content active">
+                <div class="cart-footer-modern">
+                    <div class="cart-action-buttons">
+                        <button id="payNowBtn" class="btn-cart btn-pay">
+                            <span>💳</span>
+                            <span>Pay Now</span>
+                        </button>
+                        <button id="printBillBtn" class="btn-cart btn-print">
+                            <span>🖨️</span>
+                            <span>Print Bill</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="cart-summary-modern">
+                    <div class="cart-total-modern">
+                        <span class="total-label">Total Amount</span>
+                        <span class="total-amount">₹<span id="cartTotal">0.00</span></span>
+                    </div>
+                </div>
+                
+                <div id="cartItems" class="cart-items-modern">
+                    <!-- Cart items will be dynamically loaded here -->
+                </div>
+                
+                <div class="cart-summary-modern">
+                    <div class="cart-summary-line" id="cartSubtotal" style="display: none;">
+                        <span class="summary-label">Subtotal</span>
+                        <span class="summary-value">₹<span id="cartSubtotalAmount">0.00</span></span>
+                    </div>
+                    <div class="cart-summary-line" id="cartCgst" style="display: none;">
+                        <span class="summary-label">CGST</span>
+                        <span class="summary-value">₹<span id="cartCgstAmount">0.00</span></span>
+                    </div>
+                    <div class="cart-summary-line" id="cartSgst" style="display: none;">
+                        <span class="summary-label">SGST</span>
+                        <span class="summary-value">₹<span id="cartSgstAmount">0.00</span></span>
+                    </div>
+                    <div class="cart-summary-line" id="cartTax" style="display: none;">
+                        <span class="summary-label">Total Tax</span>
+                        <span class="summary-value">₹<span id="cartTaxAmount">0.00</span></span>
+                    </div>
+                </div>
+                
+                <div class="cart-footer-modern" style="padding: 15px; border-top: 1px solid #eee;">
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label for="customerName" style="display: block; margin-bottom: 5px; font-size: 14px; color: #666;">Customer Name (Optional):</label>
+                        <input type="text" id="customerName" placeholder="Enter customer name" class="form-input" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                    </div>
+                    <button id="clearCartBtn" class="btn-cart btn-clear">
+                        <span>🗑️</span>
+                        <span>Clear Cart</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div id="previousBillsContent" class="cart-tab-content">
+                <div id="previousBillsList" class="previous-bills-list-modern">
+                    <!-- Previous bills will be dynamically loaded here -->
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Menu Management Section -->
+    <section id="menuManagementSection" class="management-section hidden">
+        <div class="section-header">
+            <h2>Menu Management</h2>
+            <button id="closeManagementBtn" class="close-btn">×</button>
+        </div>
+        <div id="menuManagementContent" class="management-content">
+            <!-- Tabs -->
+            <div class="management-tabs">
+                <button class="management-tab active" data-tab="add-item">
+                    <span>Add Item</span>
+                </button>
+                <button class="management-tab" data-tab="stock">
+                    <span>Stock</span>
+                </button>
+            </div>
+            
+            <!-- Tab Content: Add Item -->
+            <div id="addItemTab" class="management-tab-content active">
+                <div class="add-item-form">
+                    <h3>Add New Item</h3>
+                <input type="text" id="itemName" placeholder="Item Name" class="form-input">
+                <input type="text" id="itemBarcode" placeholder="Barcode (e.g., 1001)" class="form-input">
+                <div class="form-group">
+                    <label for="itemStockItem">Stock Item:</label>
+                    <select id="itemStockItem" class="form-input">
+                        <option value="no">NO</option>
+                        <option value="yes">YES</option>
+                    </select>
+                </div>
+                <div id="stockFieldsGroup" class="form-group hidden">
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <label for="itemStockValue">Stock Value:</label>
+                            <input type="number" id="itemStockValue" placeholder="Enter stock quantity" step="1" min="0" class="form-input">
+                        </div>
+                        <div style="flex: 1; min-width: 200px;">
+                            <label for="itemMinStock">Minimum Stock Reminder:</label>
+                            <input type="number" id="itemMinStock" placeholder="Enter minimum stock" step="1" min="0" class="form-input">
+                        </div>
+                    </div>
+                </div>
+                <input type="number" id="itemPrice" placeholder="Price (₹)" step="0.01" class="form-input">
+                <div class="form-group">
+                    <label for="itemTax">Tax:</label>
+                    <select id="itemTax" class="form-input">
+                        <option value="no">NO</option>
+                        <option value="yes">YES</option>
+                    </select>
+                </div>
+                <div id="gstPercentageGroup" class="form-group hidden">
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <label for="itemGstPercentage">CGST Percentage (%):</label>
+                            <input type="number" id="itemGstPercentage" placeholder="Enter CGST % (e.g., 9)" step="0.01" min="0" max="100" class="form-input">
+                        </div>
+                        <div style="flex: 1; min-width: 200px;">
+                            <label for="itemSgstPercentage">SGST Percentage (%):</label>
+                            <input type="number" id="itemSgstPercentage" placeholder="Enter SGST % (e.g., 9)" step="0.01" min="0" max="100" class="form-input">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="itemPriceIncludesTax">Include Price:</label>
+                        <select id="itemPriceIncludesTax" class="form-input">
+                            <option value="no">NO</option>
+                            <option value="yes">YES</option>
+                        </select>
+                    </div>
+                </div>
+                <label for="itemImageFile" class="file-input-label">
+                    <span>Select Image from Local Folder (or Press Ctrl+V to Paste)</span>
+                    <input type="file" id="itemImageFile" accept="image/*" class="file-input">
+                </label>
+                <div id="imagePreview" class="image-preview hidden">
+                    <img id="previewImage" src="" alt="Preview">
+                    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                        <button type="button" id="editImageBtn" class="btn btn-primary">Edit Image (Resize/Crop)</button>
+                        <button type="button" id="removeImageBtn" class="btn btn-secondary">Remove Image</button>
+                    </div>
+                </div>
+                <button id="addItemBtn" class="btn btn-primary">Add Item</button>
+                </div>
+                <div class="menu-items-list">
+                    <h3>Current Menu Items</h3>
+                    <div id="managementMenuList" class="management-menu-list">
+                        <!-- Management menu items will be loaded here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tab Content: Stock -->
+            <div id="stockTab" class="management-tab-content">
+                <div class="stock-management">
+                    <div class="stock-header">
+                        <h3>Stock Management</h3>
+                        <div class="stock-actions-header">
+                            <button id="stockFullscreenBtn" class="btn btn-secondary" title="Toggle Fullscreen">
+                                <span>⛶</span> Fullscreen
+                            </button>
+                            <button id="downloadStockTemplateBtn" class="btn btn-primary">
+                                <span>📥</span> Download Template
+                            </button>
+                            <label for="bulkStockUpload" class="btn btn-primary" style="cursor: pointer; margin: 0;">
+                                <span>📤</span> Bulk Upload
+                                <input type="file" id="bulkStockUpload" accept=".csv,.xlsx,.xls" style="display: none;">
+                            </label>
+                        </div>
+                    </div>
+                    <div class="stock-search-filter-container">
+                        <div class="stock-search-container">
+                            <input type="text" id="stockSearchInput" placeholder="Search by Item Name, Item Code, or Barcode..." class="stock-search-input">
+                            <button id="clearStockSearchBtn" class="btn btn-secondary" style="display: none;">Clear</button>
+                        </div>
+                        <div class="stock-filter-container">
+                            <label for="stockColorFilter" style="font-weight: bold; margin-right: 10px;">Filter by Status:</label>
+                            <select id="stockColorFilter" class="stock-color-filter">
+                                <option value="all">All Items</option>
+                                <option value="red">Red (Below Minimum)</option>
+                                <option value="yellow">Yellow (Zero/At Minimum)</option>
+                                <option value="normal">Normal (Above Minimum)</option>
+                            </select>
+                        </div>
+                        <div class="export-dropdown">
+                            <button id="exportStockBtn" class="btn btn-primary">
+                                <span>📊</span> Export
+                            </button>
+                            <div id="exportDropdown" class="export-dropdown-content hidden">
+                                <button id="exportExcelBtn" class="export-option">📄 Export as Excel</button>
+                                <button id="exportPdfBtn" class="export-option">📑 Export as PDF</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="stockItemsList" class="stock-items-list">
+                        <!-- Stock items will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Login</h2>
+                <button id="closeLoginModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="loginUsername">Username:</label>
+                    <input type="text" id="loginUsername" placeholder="Enter username" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="loginPassword" placeholder="Enter password" class="form-input" style="padding-right: 40px;">
+                        <button type="button" class="toggle-password-btn" onclick="togglePassword('loginPassword', 'toggleLoginPassword')" id="toggleLoginPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                    </div>
+                </div>
+                <button id="loginSubmitBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editUserModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Edit User</h2>
+                <button id="closeEditUserModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="editUserEmployeeId">Employee ID:</label>
+                    <select id="editUserEmployeeId" class="form-input">
+                        <option value="">Select Employee ID (Optional)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editUsername">Username:</label>
+                    <input type="text" id="editUsername" placeholder="Enter username" class="form-input" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="editCashierCode">Cashier Code:</label>
+                    <input type="text" id="editCashierCode" placeholder="Enter cashier code" class="form-input" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="editUserRole">Role:</label>
+                    <select id="editUserRole" class="form-input">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="currentPassword">Current Password:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="currentPassword" placeholder="Current password" class="form-input" readonly style="padding-right: 40px; background-color: #f5f5f5;">
+                        <button type="button" class="toggle-password-btn" onclick="togglePassword('currentPassword', 'toggleCurrentPassword')" id="toggleCurrentPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="editUserPassword">New Password:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="editUserPassword" placeholder="Enter new password (leave blank to keep current)" class="form-input" style="padding-right: 40px;">
+                        <button type="button" class="toggle-password-btn" onclick="togglePassword('editUserPassword', 'toggleEditUserPassword')" id="toggleEditUserPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmEditPassword">Confirm New Password:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="confirmEditPassword" placeholder="Confirm new password" class="form-input" style="padding-right: 40px;">
+                        <button type="button" class="toggle-password-btn" onclick="togglePassword('confirmEditPassword', 'toggleConfirmEditPassword')" id="toggleConfirmEditPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button id="saveUserBtn" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                    <button id="resetPasswordBtn" class="btn btn-secondary" style="flex: 1;">Reset Password</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Employee Modal -->
+    <div id="employeeModal" class="modal hidden">
+        <div id="employeeModalContent" class="modal-content" style="max-width: 800px; max-height: 90vh;">
+            <div class="modal-header">
+                <h2>Employee Management</h2>
+                <div style="display: flex; gap: 10px;">
+                    <button id="employeeFullscreenBtn" class="btn btn-secondary" style="padding: 5px 10px; font-size: 14px;">⛶ Fullscreen</button>
+                    <button id="closeEmployeeModal" class="close-btn">×</button>
+                </div>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <div class="admin-form">
+                    <div class="form-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 5px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <label for="adminEmployeeId"><strong>Admin Employee ID:</strong></label>
+                            <button id="lockAdminEmployeeIdBtn" class="btn btn-secondary" style="padding: 5px 15px; font-size: 14px;">🔓 Lock</button>
+                        </div>
+                        <div id="adminEmployeeIdContainer">
+                            <p style="font-size: 12px; color: #666; margin: 5px 0 10px 0;">Set the admin employee ID format (e.g., EMP001). This will be used to generate subsequent employee IDs.</p>
+                            <div style="display: flex; gap: 10px; align-items: flex-end;">
+                                <input type="text" id="adminEmployeeId" placeholder="Enter admin employee ID (e.g., EMP001)" class="form-input" style="flex: 1;">
+                            </div>
+                            <div id="adminEmployeeNameContainer" style="margin-top: 10px;">
+                                <label for="adminEmployeeName" style="font-size: 13px; display: block; margin-bottom: 5px;">Employee Name:</label>
+                                <input type="text" id="adminEmployeeName" placeholder="Enter employee name" class="form-input" style="font-size: 13px;">
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 20px; margin-bottom: 15px;">
+                        <button id="showAddEmployeeFormBtn" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px;">Add Employee</button>
+                    </div>
+                    <div id="addEmployeeFormContainer" style="display: none; font-size: 13px;">
+                        <h3 style="margin-bottom: 15px; font-size: 16px;">Add Employee Details</h3>
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeeId" style="font-size: 13px;">Employee ID:</label>
+                                <input type="text" id="newEmployeeId" placeholder="Auto-generated" class="form-input" readonly style="font-size: 13px;">
+                            </div>
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeeName" style="font-size: 13px;">Employee Name:</label>
+                                <input type="text" id="newEmployeeName" placeholder="Enter employee name" class="form-input" style="font-size: 13px;">
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeePosition" style="font-size: 13px;">Employee Position:</label>
+                                <input type="text" id="newEmployeePosition" placeholder="Enter employee position" class="form-input" style="font-size: 13px;">
+                            </div>
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeeIdProof" style="font-size: 13px;">Employee ID Proof:</label>
+                                <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                    <input type="text" id="newEmployeeIdProof" placeholder="Enter ID proof" class="form-input" style="font-size: 13px; width: 200px; flex: 0 0 auto;">
+                                    <label for="newEmployeeIdProofFile" class="file-input-label" style="font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-block; background: #667eea; color: white; border-radius: 5px; text-align: center; white-space: nowrap; align-self: flex-end;">
+                                        <span>📎 Attach</span>
+                                        <input type="file" id="newEmployeeIdProofFile" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp" style="display: none;">
+                                    </label>
+                                </div>
+                                <div id="employeeProofPreview" style="margin-top: 8px; display: none;">
+                                    <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: #f5f5f5; border-radius: 5px;">
+                                        <span id="employeeProofFileName" style="font-size: 12px; color: #666;"></span>
+                                        <button type="button" id="removeEmployeeProofBtn" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">Remove</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="newEmployeeAddress" style="font-size: 13px;">Employee Address:</label>
+                            <textarea id="newEmployeeAddress" placeholder="Enter employee address" class="form-input" rows="3" style="font-size: 13px;"></textarea>
+                        </div>
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeePhone" style="font-size: 13px;">Employee Phone Number:</label>
+                                <input type="text" id="newEmployeePhone" placeholder="Enter phone number" class="form-input" style="font-size: 13px;">
+                            </div>
+                            <div class="form-group" style="flex: 1; min-width: 200px;">
+                                <label for="newEmployeeReferral" style="font-size: 13px;">Employee Referral:</label>
+                                <input type="text" id="newEmployeeReferral" placeholder="Enter referral" class="form-input" style="font-size: 13px;">
+                            </div>
+                        </div>
+                        <button id="addEmployeeBtn" class="btn btn-primary" style="font-size: 13px;">Add Employee</button>
+                    </div>
+                    <div id="employeesList" style="margin-top: 20px;">
+                        <h4>Employees List</h4>
+                        <div id="employeesListContent" style="max-height: 400px; overflow-y: auto; padding-right: 5px;">
+                            <!-- Employees will be listed here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Employee Modal -->
+    <div id="editEmployeeModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh;">
+            <div class="modal-header">
+                <h2>Edit Employee</h2>
+                <button id="closeEditEmployeeModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto;">
+                <div class="admin-form">
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeeId" style="font-size: 13px;">Employee ID:</label>
+                            <input type="text" id="editEmployeeId" class="form-input" readonly style="font-size: 13px;">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeeName" style="font-size: 13px;">Employee Name:</label>
+                            <input type="text" id="editEmployeeName" placeholder="Enter employee name" class="form-input" style="font-size: 13px;">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeePosition" style="font-size: 13px;">Employee Position:</label>
+                            <input type="text" id="editEmployeePosition" placeholder="Enter employee position" class="form-input" style="font-size: 13px;">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeeIdProof" style="font-size: 13px;">Employee ID Proof:</label>
+                            <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                <input type="text" id="editEmployeeIdProof" placeholder="Enter ID proof" class="form-input" style="font-size: 13px; width: 200px; flex: 0 0 auto;">
+                                <label for="editEmployeeIdProofFile" class="file-input-label" style="font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-block; background: #667eea; color: white; border-radius: 5px; text-align: center; white-space: nowrap; align-self: flex-end;">
+                                    <span>📎 Attach</span>
+                                    <input type="file" id="editEmployeeIdProofFile" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp" style="display: none;">
+                                </label>
+                            </div>
+                            <div id="editEmployeeProofPreview" style="margin-top: 8px; display: none;">
+                                <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: #f5f5f5; border-radius: 5px;">
+                                    <span id="editEmployeeProofFileName" style="font-size: 12px; color: #666;"></span>
+                                    <button type="button" id="removeEditEmployeeProofBtn" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="editEmployeeAddress" style="font-size: 13px;">Employee Address:</label>
+                        <textarea id="editEmployeeAddress" placeholder="Enter employee address" class="form-input" rows="3" style="font-size: 13px;"></textarea>
+                    </div>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeePhone" style="font-size: 13px;">Employee Phone Number:</label>
+                            <input type="text" id="editEmployeePhone" placeholder="Enter phone number" class="form-input" style="font-size: 13px;">
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 200px;">
+                            <label for="editEmployeeReferral" style="font-size: 13px;">Employee Referral:</label>
+                            <input type="text" id="editEmployeeReferral" placeholder="Enter referral" class="form-input" style="font-size: 13px;">
+                        </div>
+                    </div>
+                    <div style="margin-top: 20px; display: flex; gap: 10px;">
+                        <button id="saveEmployeeChangesBtn" class="btn btn-primary" style="font-size: 13px;">Save Changes</button>
+                        <button id="cancelEditEmployeeBtn" class="btn btn-secondary" style="font-size: 13px;">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
+    <div id="adminLoginModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>Admin Login</h2>
+                <button id="closeAdminLoginModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="adminUsername">Username:</label>
+                    <input type="text" id="adminUsername" placeholder="Enter username" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="adminPassword">Password:</label>
+                    <div style="position: relative;">
+                        <input type="password" id="adminPassword" placeholder="Enter password" class="form-input" style="padding-right: 40px;">
+                        <button type="button" class="toggle-password-btn" onclick="togglePassword('adminPassword', 'toggleAdminPassword')" id="toggleAdminPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                    </div>
+                </div>
+                <button id="adminLoginBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Section -->
+    <section id="adminSection" class="management-section hidden">
+        <div class="section-header">
+            <h2>Admin Settings</h2>
+            <button id="closeAdminBtn" class="close-btn">×</button>
+        </div>
+        <div class="admin-content">
+            <div id="userManagementSection">
+                <div class="admin-form">
+                    <h3>User Management</h3>
+                    <div style="margin-bottom: 20px;">
+                        <p><strong>Current User:</strong> <span id="currentUserDisplay">Guest</span></p>
+                        <p><strong>Role:</strong> <span id="currentUserRole">Guest</span></p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button id="employeeBtn" class="btn btn-primary">Employee</button>
+                            <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="newUserEmployeeId">Employee ID:</label>
+                        <select id="newUserEmployeeId" class="form-input">
+                            <option value="">Select Employee ID (Optional)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="newUsername">Username:</label>
+                        <input type="text" id="newUsername" placeholder="Enter username" class="form-input" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="newCashierCode">Cashier Code:</label>
+                        <input type="text" id="newCashierCode" placeholder="Enter cashier code" class="form-input" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">Password:</label>
+                        <div style="position: relative;">
+                            <input type="password" id="newPassword" placeholder="Enter password" class="form-input" style="padding-right: 40px;">
+                            <button type="button" class="toggle-password-btn" onclick="togglePassword('newPassword', 'toggleNewPassword')" id="toggleNewPassword" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: #666;">👁️</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="userRole">Role:</label>
+                        <select id="userRole" class="form-input">
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <button id="addUserBtn" class="btn btn-primary">Add User</button>
+                    <div id="usersList" style="margin-top: 20px;">
+                        <h4>Users List</h4>
+                        <div id="usersListContent">
+                            <!-- Users will be listed here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="admin-form">
+                <h3>Restaurant Information</h3>
+                <div class="form-group">
+                    <label for="restaurantName">Restaurant Name:</label>
+                    <input type="text" id="restaurantName" placeholder="Enter restaurant name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="restaurantAddress">Restaurant Address:</label>
+                    <textarea id="restaurantAddress" placeholder="Enter restaurant address" class="form-input" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <label for="startingBillNumber" style="margin: 0; white-space: nowrap;">Starting Bill Number:</label>
+                        <input type="number" id="startingBillNumber" placeholder="Enter starting bill number (e.g., 1001)" class="form-input" min="1" step="1" readonly style="flex: 1; max-width: 200px;">
+                        <button type="button" id="lockStartingBillNumberBtn" class="btn btn-secondary" style="padding: 5px 15px; font-size: 14px; white-space: nowrap;">🔓 Unlock</button>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                    <div class="form-group" style="flex: 1; min-width: 250px;">
+                        <label for="restaurantGstin">GSTIN:</label>
+                        <input type="text" id="restaurantGstin" placeholder="Enter GSTIN (e.g., 29ABCDE1234F1Z5)" class="form-input" pattern="[A-Z0-9]{15}" maxlength="15">
+                    </div>
+                    <div class="form-group" style="flex: 1; min-width: 250px;">
+                        <label for="restaurantFssai">FSSAI Code:</label>
+                        <input type="text" id="restaurantFssai" placeholder="Enter FSSAI Code (e.g., 12345678901234)" class="form-input" pattern="[0-9]{14}" maxlength="14">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div class="form-group" style="flex: 1; min-width: 200px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="showGstinInBill" style="width: auto; cursor: pointer;">
+                            <span>Show GSTIN in Print Bill</span>
+                        </label>
+                    </div>
+                    <div class="form-group" style="flex: 1; min-width: 200px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="showFssaiInBill" style="width: auto; cursor: pointer;">
+                            <span>Show FSSAI Code in Print Bill</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="qrCodeFile" class="file-input-label">
+                        <span>Select QR Code Image from Local Folder</span>
+                        <input type="file" id="qrCodeFile" accept="image/*" class="file-input">
+                    </label>
+                    <div id="qrCodePreview" class="image-preview hidden">
+                        <img id="qrCodePreviewImage" src="" alt="QR Code Preview">
+                        <button type="button" id="removeQRCodeBtn" class="btn btn-secondary">Remove QR Code</button>
+                    </div>
+                </div>
+                <button id="saveRestaurantInfoBtn" class="btn btn-primary">Save Information</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Sales Report Section -->
+    <section id="salesReportSection" class="management-section hidden">
+        <div class="section-header">
+            <h2>Sales Report & Transaction History</h2>
+            <button id="closeSalesReportBtn" class="close-btn">×</button>
+        </div>
+        
+        <!-- Modern Tabbed Interface -->
+        <div class="report-tabs-container">
+            <div class="report-tabs">
+                <button class="report-tab active" data-tab="date-range">
+                    <span class="tab-icon">📅</span>
+                    <span>Date Range Report</span>
+                </button>
+                <button class="report-tab" data-tab="order-search">
+                    <span class="tab-icon">🔍</span>
+                    <span>Search Order</span>
+                </button>
+                <button class="report-tab" data-tab="user-wise">
+                    <span class="tab-icon">👤</span>
+                    <span>User-Wise Report</span>
+                </button>
+                <button class="report-tab" data-tab="item-wise">
+                    <span class="tab-icon">📦</span>
+                    <span>Item-Wise Report</span>
+                </button>
+                <button class="report-tab" data-tab="transactions">
+                    <span class="tab-icon">📋</span>
+                    <span>Transaction History</span>
+                </button>
+                <button class="report-tab" data-tab="cancelled">
+                    <span class="tab-icon">❌</span>
+                    <span>Cancelled Bills</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Tab Content Sections -->
+        <div class="report-tab-contents">
+            <!-- Date Range Report Tab -->
+            <div class="report-tab-content active" id="tab-date-range">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>📅 Date Range Report</h3>
+                        <p class="report-card-description">Generate comprehensive sales reports for a specific date range</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div class="date-range-controls">
+                            <div class="date-input-group">
+                                <label for="startDate">From Date</label>
+                                <input type="date" id="startDate" class="form-input">
+                            </div>
+                            <div class="date-input-group">
+                                <label for="endDate">To Date</label>
+                                <input type="date" id="endDate" class="form-input">
+                            </div>
+                        </div>
+                        <button id="generateDateRangeReportBtn" class="btn btn-primary btn-large">
+                            <span>Generate Report</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search Order Tab -->
+            <div class="report-tab-content" id="tab-order-search">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>🔍 Search Order</h3>
+                        <p class="report-card-description">Find specific orders by order number</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div class="search-controls">
+                            <div class="search-input-group">
+                                <label for="orderSearchInput">Order Number</label>
+                                <input type="text" id="orderSearchInput" placeholder="Enter Order Number" class="form-input">
+                            </div>
+                        </div>
+                        <button id="searchOrderBtn" class="btn btn-primary btn-large">
+                            <span>Search Order</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User-Wise Report Tab -->
+            <div class="report-tab-content" id="tab-user-wise">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>👤 User-Wise Report</h3>
+                        <p class="report-card-description">Analyze sales performance by user for a specific date range</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div class="date-range-controls">
+                            <div class="date-input-group">
+                                <label for="userReportStartDate">From Date</label>
+                                <input type="date" id="userReportStartDate" class="form-input">
+                            </div>
+                            <div class="date-input-group">
+                                <label for="userReportEndDate">To Date</label>
+                                <input type="date" id="userReportEndDate" class="form-input">
+                            </div>
+                        </div>
+                        <button id="generateUserWiseReportBtn" class="btn btn-primary btn-large">
+                            <span>Generate User-Wise Report</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Item-Wise Report Tab -->
+            <div class="report-tab-content" id="tab-item-wise">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>📦 Item-Wise Report</h3>
+                        <p class="report-card-description">Get detailed sales breakdown by menu items</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div class="date-range-controls">
+                            <div class="date-input-group">
+                                <label for="itemReportStartDate">From Date</label>
+                                <input type="date" id="itemReportStartDate" class="form-input">
+                            </div>
+                            <div class="date-input-group">
+                                <label for="itemReportEndDate">To Date</label>
+                                <input type="date" id="itemReportEndDate" class="form-input">
+                            </div>
+                        </div>
+                        <button id="generateItemWiseReportBtn" class="btn btn-primary btn-large">
+                            <span>Generate Item-Wise Report</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transaction History Tab -->
+            <div class="report-tab-content" id="tab-transactions">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>📋 Transaction History</h3>
+                        <p class="report-card-description">View all completed transactions</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div id="transactionHistoryContent" class="transaction-list">
+                            <!-- Transaction history will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cancelled Bills Tab -->
+            <div class="report-tab-content" id="tab-cancelled">
+                <div class="report-card">
+                    <div class="report-card-header">
+                        <h3>❌ Cancelled Bills</h3>
+                        <p class="report-card-description">View all cancelled transactions</p>
+                    </div>
+                    <div class="report-card-body">
+                        <div id="cancelledBillsContent" class="transaction-list">
+                            <!-- Cancelled bills will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Results Section (hidden - reports now show in popup) -->
+        <div id="salesReportContent" class="report-content hidden">
+            <!-- Sales report will be displayed here -->
+        </div>
+    </section>
+
+    <!-- Report Popup Modal -->
+    <div id="reportModal" class="modal hidden">
+        <div class="modal-content report-modal-content">
+            <div class="modal-header">
+                <h2 id="reportModalTitle">Sales Report</h2>
+                <div class="modal-header-actions">
+                    <button id="fullscreenReportBtn" class="fullscreen-btn" title="Toggle Fullscreen">
+                        <span class="fullscreen-icon">⛶</span>
+                    </button>
+                    <button id="closeReportModal" class="close-btn">×</button>
+                </div>
+            </div>
+            <div class="modal-body report-modal-body">
+                <div id="reportModalContent">
+                    <!-- Report content will be displayed here -->
+                </div>
+            </div>
+            <div class="modal-footer report-modal-footer">
+                <div class="export-buttons">
+                    <button id="exportPDFBtn" class="btn btn-primary">Export as PDF</button>
+                    <button id="exportExcelBtn" class="btn btn-primary">Export as Excel</button>
+                </div>
+                <button id="closeReportModalBtn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cancel Bill Section -->
+    <section id="cancelBillSection" class="management-section hidden">
+        <div class="section-header">
+            <h2>Cancel Bill</h2>
+            <button id="closeCancelBillBtn" class="close-btn">×</button>
+        </div>
+        <div class="cancel-bill-content">
+            <div class="control-group">
+                <h3>Search by Order Number</h3>
+                <div class="search-controls">
+                    <input type="text" id="cancelBillOrderSearch" placeholder="Enter Order Number" class="form-input">
+                    <button id="searchCancelBillBtn" class="btn btn-primary">Search</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <h3>Search by Date Range</h3>
+                <div class="date-range-controls">
+                    <label for="cancelBillStartDate">From Date:</label>
+                    <input type="date" id="cancelBillStartDate" class="form-input">
+                    <label for="cancelBillEndDate">To Date:</label>
+                    <input type="date" id="cancelBillEndDate" class="form-input">
+                    <button id="searchCancelBillByDateBtn" class="btn btn-primary">Search</button>
+                </div>
+            </div>
+            <div id="cancelBillResults" class="cancel-bill-results">
+                <!-- Search results will be displayed here -->
+            </div>
+            <div id="cancelBillTransactionDetails" class="transaction-details hidden">
+                <h3>Transaction Details</h3>
+                <div id="cancelBillTransactionContent">
+                    <!-- Transaction details will be displayed here -->
+                </div>
+            </div>
+            <div id="cancelBillTransactionHistory" class="transaction-history-section">
+                <h3>Transaction History</h3>
+                <div id="cancelBillTransactionHistoryContent" class="transaction-list">
+                    <!-- Transaction history will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Print Bill Preview Modal -->
+    <div id="printBillPreviewModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Bill Preview</h2>
+                <button id="closePrintBillPreviewModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="printBillPreviewContent">
+                    <!-- Print bill preview content will be displayed here -->
+                </div>
+                <div class="bill-preview-actions" style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div id="billPreviewTotal" style="font-size: 18px; font-weight: bold; color: #4CAF50;">
+                        <!-- Total amount will be displayed here -->
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="confirmPrintBillBtn" class="btn btn-primary">Print Bill</button>
+                        <button id="cancelPrintBillBtn" class="btn btn-cancel">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Previous Bill Preview Modal -->
+    <div id="previousBillModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Bill Preview</h2>
+                <button id="closePreviousBillModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="previousBillContent">
+                    <!-- Previous bill content will be displayed here -->
+                </div>
+                <div class="bill-preview-actions" style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div id="previousBillTotal" style="font-size: 18px; font-weight: bold; color: #4CAF50;">
+                        <!-- Total amount will be displayed here -->
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="printPreviousBillBtn" class="btn btn-primary">Print Bill</button>
+                        <button id="cancelPreviousBillBtn" class="btn btn-cancel hidden">Cancel Bill</button>
+                        <button id="closePreviousBillBtn" class="btn btn-secondary">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Payment</h2>
+                <button id="closeQRModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="payment-amount">
+                    <p style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">Total Amount: ₹<span id="qrAmount">0.00</span></p>
+                </div>
+                <div class="payment-methods">
+                    <h3>Select Payment Method</h3>
+                    <div class="payment-options">
+                        <button id="gpayBtn" class="payment-method-btn">
+                            <span style="font-size: 24px;">💳</span>
+                            <span>GPay</span>
+                        </button>
+                        <button id="cashBtn" class="payment-method-btn">
+                            <span style="font-size: 24px;">💵</span>
+                            <span>Cash</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="gpaySection" class="payment-section hidden">
+                    <img id="qrCodeImage" src="images/qr-placeholder.png" alt="QR Code" class="qr-image">
+                    <p style="margin-top: 10px;">Scan QR Code to Pay</p>
+                    <button id="confirmGPayBtn" class="btn btn-primary">Confirm GPay Payment</button>
+                </div>
+                <div id="cashSection" class="payment-section hidden">
+                    <div class="cash-payment-info">
+                        <p style="margin-bottom: 15px;">Payment Method: <strong>Cash</strong></p>
+                        <button id="confirmCashBtn" class="btn btn-primary">Confirm Cash Payment</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Crop/Resize Modal -->
+    <div id="imageEditModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px; width: 95%;">
+            <div class="modal-header">
+                <h2>Edit Image - Resize & Crop</h2>
+                <button id="closeImageEditModal" class="close-btn">×</button>
+            </div>
+            <div class="modal-body" style="text-align: left;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Original Image (Click & Drag to Select Crop Area):</label>
+                            <div class="canvas-container" style="display: inline-block; position: relative;">
+                                <canvas id="imageCanvas" style="max-width: 100%; border: 2px solid #ddd; border-radius: 8px; cursor: crosshair; display: block;"></canvas>
+                            </div>
+                            <canvas id="cropCanvas" style="display: none;"></canvas>
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: bold;">Preview:</label>
+                            <img id="editPreviewImage" src="" alt="Preview" style="max-width: 100%; max-height: 300px; border: 2px solid #ddd; border-radius: 8px;">
+                        </div>
+                    </div>
+                    <div style="flex: 1; min-width: 250px;">
+                        <h3 style="margin-bottom: 15px;">Resize Options</h3>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Width (px):</label>
+                            <input type="number" id="resizeWidth" class="form-input" min="1" step="1" placeholder="Auto">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Height (px):</label>
+                            <input type="number" id="resizeHeight" class="form-input" min="1" step="1" placeholder="Auto">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="maintainAspectRatio" checked>
+                                <span>Maintain Aspect Ratio</span>
+                            </label>
+                        </div>
+                        <button id="applyResizeBtn" class="btn btn-primary" style="width: 100%; margin-bottom: 15px;">Apply Resize</button>
+                        
+                        <h3 style="margin-bottom: 15px; margin-top: 25px;">Crop Options</h3>
+                        <div style="margin-bottom: 15px;">
+                            <p style="font-size: 12px; color: #666; margin-bottom: 10px;">Click and drag on the image above to select crop area</p>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 12px;">X:</label>
+                                    <input type="number" id="cropX" class="form-input" min="0" step="1" readonly style="font-size: 12px;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 12px;">Y:</label>
+                                    <input type="number" id="cropY" class="form-input" min="0" step="1" readonly style="font-size: 12px;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 12px;">Width:</label>
+                                    <input type="number" id="cropWidth" class="form-input" min="1" step="1" readonly style="font-size: 12px;">
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 12px;">Height:</label>
+                                    <input type="number" id="cropHeight" class="form-input" min="1" step="1" readonly style="font-size: 12px;">
+                                </div>
+                            </div>
+                            <button id="applyCropBtn" class="btn btn-primary" style="width: 100%; margin-bottom: 15px;">Apply Crop</button>
+                            <button id="resetCropBtn" class="btn btn-secondary" style="width: 100%;">Reset Crop</button>
+                        </div>
+                        
+                        <div style="margin-top: 25px; padding-top: 20px; border-top: 2px solid #ddd;">
+                            <button id="saveEditedImageBtn" class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">Save Changes</button>
+                            <button id="cancelEditImageBtn" class="btn btn-cancel" style="width: 100%;">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Print Bill Section (hidden, for printing) -->
+    <div id="printBill" class="print-bill hidden">
+        <div class="pos-bill">
+            <div class="pos-header">
+                <div class="pos-restaurant-name" id="billRestaurantName">Restaurant Bill</div>
+                <div class="pos-restaurant-address" id="billRestaurantAddress"></div>
+                <div class="pos-restaurant-gstin" id="billRestaurantGstin"></div>
+                <div class="pos-restaurant-fssai" id="billRestaurantFssai"></div>
+                <div class="pos-separator">--------------------------------</div>
+                <div class="pos-order-info">
+                    <div><strong style="font-size: 16px;">Bill No.:</strong> <span id="billOrderNumber" style="font-size: 16px; font-weight: bold;"></span></div>
+                    <div id="billCustomerName" style="display: none; margin-top: 5px;"><strong>Customer Name:</strong> <span id="billCustomerNameValue"></span></div>
+                    <div id="billCashierCode" style="display: none; margin-top: 5px;"><strong>Cashier Code:</strong> <span id="billCashierCodeValue"></span></div>
+                    <div>Date: <span id="billDate"></span></div>
+                </div>
+                <div class="pos-separator">--------------------------------</div>
+            </div>
+            <div class="pos-items">
+                <div class="pos-item-header">
+                    <span class="pos-item-name">Item</span>
+                    <span class="pos-item-price">Price</span>
+                    <span class="pos-item-qty">Qty</span>
+                    <span class="pos-item-total">Total</span>
+                </div>
+                <div id="billItemsBody">
+                    <!-- Bill items will be populated here -->
+                </div>
+                <div class="pos-separator">--------------------------------</div>
+                <div class="pos-subtotal" id="billSubtotal" style="display: none;">
+                    <span>Subtotal: ₹<span id="billSubtotalAmount">0.00</span></span>
+                </div>
+                <div class="pos-tax" id="billCgst" style="display: none;">
+                    <span>CGST: ₹<span id="billCgstAmount">0.00</span></span>
+                </div>
+                <div class="pos-tax" id="billSgst" style="display: none;">
+                    <span>SGST: ₹<span id="billSgstAmount">0.00</span></span>
+                </div>
+                <div class="pos-tax" id="billTax" style="display: none;">
+                    <span>Total Tax: ₹<span id="billTaxAmount">0.00</span></span>
+                </div>
+            </div>
+            <div class="pos-footer">
+                <div class="pos-total">
+                    <span>Grand Total: ₹<span id="billTotal">0.00</span></span>
+                </div>
+                <div class="pos-separator">================================</div>
+                <div class="pos-thankyou">Thank you for your visit!</div>
+                <div class="pos-separator">--------------------------------</div>
+            </div>
+        </div>
+    </div>
+
+    
+
+    <script src="script.js"></script>
+</body>
+</html>
+
+
+
+
+

@@ -1,0 +1,4118 @@
+﻿// LocalStorage Keys
+const STORAGE_KEYS = {
+    MENU_ITEMS: 'menuItems',
+    ORDERS: 'orders',
+    CANCELLED_ORDERS: 'cancelledOrders',
+    RESTAURANT_INFO: 'restaurantInfo',
+    USERS: 'users',
+    CURRENT_USER: 'currentUser'
+};
+
+// Default Menu Items
+const DEFAULT_MENU_ITEMS = [
+    { id: 1, name: 'Idly', price: 30.00, image: 'images/idly.jpg', barcode: '1001' },
+    { id: 2, name: 'Dosa', price: 50.00, image: 'images/dosa.jpg', barcode: '1002' },
+    { id: 3, name: 'Parotta', price: 40.00, image: 'images/parotta.jpg', barcode: '1003' },
+    { id: 4, name: 'Vada', price: 25.00, image: 'images/vada.jpg', barcode: '1004' },
+    { id: 5, name: 'Pongal', price: 35.00, image: 'images/pongal.jpg', barcode: '1005' }
+];
+
+// State
+let cart = [];
+let menuItems = [];
+let editingItemId = null;
+let selectedImageBase64 = null;
+let qrCodeBase64 = null;
+let qrCodeRemoved = false;
+let currentUser = null;
+let isAdmin = false;
+
+// Initialize App
+document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+    setupEventListeners();
+});
+
+// Initialize Application
+function initializeApp() {
+    // Initialize LocalStorage
+    if (!localStorage.getItem(STORAGE_KEYS.MENU_ITEMS)) {
+        localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(DEFAULT_MENU_ITEMS));
+    } else {
+        // Ensure existing items have barcodes
+        const existingItems = JSON.parse(localStorage.getItem(STORAGE_KEYS.MENU_ITEMS) || '[]');
+        let updated = false;
+        existingItems.forEach(item => {
+            if (!item.barcode) {
+                item.barcode = String(1000 + item.id);
+                updated = true;
+            }
+        });
+        if (updated) {
+            localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(existingItems));
+        }
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.ORDERS)) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS)) {
+        localStorage.setItem(STORAGE_KEYS.CANCELLED_ORDERS, JSON.stringify([]));
+    }
+    
+    // Initialize users - create default admin if no users exist
+    if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
+        const defaultUsers = [
+            { id: 1, username: 'admin', password: 'admin123', role: 'admin' },
+            { id: 2, username: 'user1', password: 'user123', role: 'user' }
+        ];
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(defaultUsers));
+    }
+    
+    // Load current user
+    const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        isAdmin = currentUser.role === 'admin';
+        updateUserDisplay();
+    } else {
+        // Clear cart if no user is logged in
+        cart = [];
+        saveCart();
+    }
+
+    // Load menu items
+    menuItems = JSON.parse(localStorage.getItem(STORAGE_KEYS.MENU_ITEMS) || '[]');
+    
+    // Load restaurant info and update header
+    loadRestaurantInfo();
+    
+    // Render menu
+    renderMenu();
+    
+    // Load cart from localStorage only if user is logged in
+    if (currentUser) {
+        const savedCart = localStorage.getItem('cart');
+        if (savedCart) {
+            cart = JSON.parse(savedCart);
+        }
+    }
+    renderCart();
+}
+
+// Setup Event Listeners
+function setupEventListeners() {
+    // Login button (will be updated by updateUserDisplay based on login status)
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.addEventListener('click', () => {
+        if (currentUser) {
+            // If logged in, show logout confirmation
+            if (confirm('Are you sure you want to logout?')) {
+                logout();
+            }
+        } else {
+            // If not logged in, show login modal
+            document.getElementById('loginModal').classList.remove('hidden');
+        }
+    });
+    
+    // Login Modal
+    document.getElementById('loginSubmitBtn').addEventListener('click', handleLogin);
+    document.getElementById('closeLoginModal').addEventListener('click', () => {
+        document.getElementById('loginModal').classList.add('hidden');
+        // Clear form
+        document.getElementById('loginUsername').value = '';
+        document.getElementById('loginPassword').value = '';
+    });
+    document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            handleLogin();
+        }
+    });
+    document.getElementById('loginUsername').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('loginPassword').focus();
+        }
+    });
+    
+    // Close login modal on outside click
+    document.getElementById('loginModal').addEventListener('click', (e) => {
+        if (e.target.id === 'loginModal') {
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+        }
+    });
+    
+    // Edit User Modal
+    document.getElementById('saveUserBtn').addEventListener('click', saveUserChanges);
+    document.getElementById('resetPasswordBtn').addEventListener('click', resetUserPassword);
+    document.getElementById('closeEditUserModal').addEventListener('click', closeEditUserModal);
+    document.getElementById('editUserModal').addEventListener('click', (e) => {
+        if (e.target.id === 'editUserModal') {
+            closeEditUserModal();
+        }
+    });
+    
+    // Navigation buttons
+    document.getElementById('adminBtn').addEventListener('click', () => {
+        if (isAdmin) {
+            showAdmin();
+        } else {
+            document.getElementById('adminLoginModal').classList.remove('hidden');
+        }
+    });
+    
+    // Admin Login
+    document.getElementById('adminLoginBtn').addEventListener('click', adminLogin);
+    document.getElementById('closeAdminLoginModal').addEventListener('click', () => {
+        document.getElementById('adminLoginModal').classList.add('hidden');
+    });
+    document.getElementById('adminPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            adminLogin();
+        }
+    });
+    
+    // User Management
+    document.getElementById('addUserBtn').addEventListener('click', addUser);
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    
+    // Cancel Bill (Admin only)
+    document.getElementById('cancelPreviousBillBtn').addEventListener('click', cancelBill);
+    
+    document.getElementById('menuManagementBtn').addEventListener('click', () => {
+        showMenuManagement();
+    });
+    
+    document.getElementById('salesReportBtn').addEventListener('click', () => {
+        showSalesReport();
+    });
+    
+    // Cancel Bill Section
+    document.getElementById('cancelBillBtn').addEventListener('click', () => {
+        if (isAdmin) {
+            showCancelBillSection();
+        } else {
+            alert('Only admins can access Cancel Bill section!');
+            document.getElementById('adminLoginModal').classList.remove('hidden');
+        }
+    });
+    document.getElementById('closeCancelBillBtn').addEventListener('click', () => {
+        document.getElementById('cancelBillSection').classList.add('hidden');
+    });
+    document.getElementById('searchCancelBillBtn').addEventListener('click', searchCancelBillByNumber);
+    document.getElementById('cancelBillOrderSearch').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            searchCancelBillByNumber();
+        }
+    });
+    document.getElementById('searchCancelBillByDateBtn').addEventListener('click', searchCancelBillByDate);
+
+    // Menu search
+    document.getElementById('menuSearchInput').addEventListener('input', (e) => {
+        filterMenuItems(e.target.value);
+    });
+
+    // Cart controls
+    document.getElementById('clearCartBtn').addEventListener('click', clearCart);
+    document.getElementById('payNowBtn').addEventListener('click', showQRModal);
+    document.getElementById('printBillBtn').addEventListener('click', printBill);
+    
+    // Cart tabs
+    document.getElementById('currentCartTab').addEventListener('click', () => {
+        switchCartTab('current');
+    });
+    document.getElementById('previousBillsTab').addEventListener('click', () => {
+        switchCartTab('previous');
+    });
+
+    // Menu Management
+    document.getElementById('closeManagementBtn').addEventListener('click', () => {
+        document.getElementById('menuManagementSection').classList.add('hidden');
+        editingItemId = null;
+        removeImagePreview();
+        // Clear form
+        document.getElementById('itemName').value = '';
+        document.getElementById('itemPrice').value = '';
+        document.getElementById('itemImageFile').value = '';
+        document.getElementById('itemTax').value = 'no';
+        document.getElementById('gstPercentageGroup').classList.add('hidden');
+        document.getElementById('itemGstPercentage').value = '';
+    });
+    document.getElementById('addItemBtn').addEventListener('click', addMenuItem);
+    document.getElementById('itemImageFile').addEventListener('change', handleImageSelect);
+    document.getElementById('removeImageBtn').addEventListener('click', removeImagePreview);
+    document.getElementById('itemTax').addEventListener('change', function() {
+        const gstGroup = document.getElementById('gstPercentageGroup');
+        if (this.value === 'yes') {
+            gstGroup.classList.remove('hidden');
+        } else {
+            gstGroup.classList.add('hidden');
+            document.getElementById('itemGstPercentage').value = '';
+        }
+    });
+
+    // Admin
+    document.getElementById('closeAdminBtn').addEventListener('click', () => {
+        document.getElementById('adminSection').classList.add('hidden');
+    });
+    document.getElementById('saveRestaurantInfoBtn').addEventListener('click', saveRestaurantInfo);
+    document.getElementById('qrCodeFile').addEventListener('change', handleQRCodeSelect);
+    document.getElementById('removeQRCodeBtn').addEventListener('click', removeQRCodePreview);
+
+    // Sales Report
+    document.getElementById('closeSalesReportBtn').addEventListener('click', () => {
+        document.getElementById('salesReportSection').classList.add('hidden');
+    });
+    document.getElementById('generateDateRangeReportBtn').addEventListener('click', () => {
+        generateDateRangeReport();
+    });
+    document.getElementById('searchOrderBtn').addEventListener('click', searchOrder);
+    document.getElementById('orderSearchInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            searchOrder();
+        }
+    });
+    document.getElementById('generateUserWiseReportBtn').addEventListener('click', generateUserWiseReport);
+    document.getElementById('generateItemWiseReportBtn').addEventListener('click', generateItemWiseReport);
+    document.getElementById('exportPDFBtn').addEventListener('click', exportToPDF);
+    document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
+
+    // Print Bill Preview Modal
+    document.getElementById('closePrintBillPreviewModal').addEventListener('click', () => {
+        document.getElementById('printBillPreviewModal').classList.add('hidden');
+    });
+    document.getElementById('cancelPrintBillBtn').addEventListener('click', () => {
+        document.getElementById('printBillPreviewModal').classList.add('hidden');
+    });
+    document.getElementById('confirmPrintBillBtn').addEventListener('click', () => {
+        document.getElementById('printBillPreviewModal').classList.add('hidden');
+        // Proceed with actual print
+        printBillDirect();
+    });
+    
+    // Close print bill preview modal on outside click
+    document.getElementById('printBillPreviewModal').addEventListener('click', (e) => {
+        if (e.target.id === 'printBillPreviewModal') {
+            document.getElementById('printBillPreviewModal').classList.add('hidden');
+        }
+    });
+
+    // Previous Bill Modal
+    document.getElementById('closePreviousBillModal').addEventListener('click', () => {
+        document.getElementById('previousBillModal').classList.add('hidden');
+    });
+    document.getElementById('closePreviousBillBtn').addEventListener('click', () => {
+        document.getElementById('previousBillModal').classList.add('hidden');
+    });
+    document.getElementById('printPreviousBillBtn').addEventListener('click', () => {
+        if (currentPreviewOrder) {
+            printBillForOrder(currentPreviewOrder);
+        }
+    });
+    
+    // Close previous bill modal on outside click
+    document.getElementById('previousBillModal').addEventListener('click', (e) => {
+        if (e.target.id === 'previousBillModal') {
+            document.getElementById('previousBillModal').classList.add('hidden');
+        }
+    });
+
+    // QR Modal
+    document.getElementById('closeQRModal').addEventListener('click', () => {
+        document.getElementById('qrModal').classList.add('hidden');
+        resetPaymentModal();
+    });
+    document.getElementById('gpayBtn').addEventListener('click', () => {
+        showGPaySection();
+    });
+    document.getElementById('cashBtn').addEventListener('click', () => {
+        showCashSection();
+    });
+    document.getElementById('confirmGPayBtn').addEventListener('click', confirmPayment);
+    document.getElementById('confirmCashBtn').addEventListener('click', confirmCashPayment);
+
+    // Close modals on outside click
+    document.getElementById('qrModal').addEventListener('click', (e) => {
+        if (e.target.id === 'qrModal') {
+            document.getElementById('qrModal').classList.add('hidden');
+        }
+    });
+}
+
+// Menu Rendering
+let filteredMenuItems = [];
+
+function renderMenu(itemsToRender = null) {
+    const menuGrid = document.getElementById('menuGrid');
+    menuGrid.innerHTML = '';
+
+    const items = itemsToRender || menuItems;
+    filteredMenuItems = items;
+
+    if (items.length === 0) {
+        menuGrid.innerHTML = '<p style="text-align: center; color: #999; grid-column: 1 / -1; padding: 40px;">No items found.</p>';
+        return;
+    }
+
+    items.forEach(item => {
+        const menuItem = document.createElement('div');
+        menuItem.className = 'menu-item';
+        menuItem.innerHTML = `
+            <img src="${item.image}" alt="${item.name}" onclick="addToCart(${item.id})" style="cursor: pointer;" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect fill=%22%23ddd%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%23999%22 font-family=%22sans-serif%22 font-size=%2214%22 dy=%2210.5%22 font-weight=%22bold%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3E${item.name}%3C/text%3E%3C/svg%3E'">
+            <div class="menu-item-info">
+                <h3>${item.name}</h3>
+                <p>â‚¹${item.price.toFixed(2)}</p>
+            </div>
+        `;
+        menuGrid.appendChild(menuItem);
+    });
+}
+
+function filterMenuItems(searchTerm) {
+    const term = searchTerm.toLowerCase().trim();
+    
+    if (term === '') {
+        renderMenu();
+        return;
+    }
+    
+    const filtered = menuItems.filter(item => 
+        item.name.toLowerCase().includes(term) ||
+        (item.barcode && item.barcode.toLowerCase().includes(term))
+    );
+    
+    renderMenu(filtered);
+}
+
+// Cart Functions
+function addToCart(itemId) {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to add items to cart!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        return;
+    }
+    
+    const item = menuItems.find(i => i.id === itemId);
+    if (!item) return;
+
+    const existingItem = cart.find(c => c.id === itemId);
+    if (existingItem) {
+        existingItem.quantity += 1;
+    } else {
+        cart.push({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+            hasTax: item.hasTax || false,
+            gstPercentage: item.gstPercentage || 0
+        });
+    }
+
+    saveCart();
+    renderCart();
+    updateCartCount();
+}
+
+function removeFromCart(itemId) {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to manage cart!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        return;
+    }
+    
+    cart = cart.filter(item => item.id !== itemId);
+    saveCart();
+    renderCart();
+    updateCartCount();
+}
+
+function updateQuantity(itemId, change) {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to manage cart!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        return;
+    }
+    
+    const item = cart.find(c => c.id === itemId);
+    if (!item) return;
+
+    item.quantity += change;
+    if (item.quantity <= 0) {
+        removeFromCart(itemId);
+    } else {
+        saveCart();
+        renderCart();
+        updateCartCount();
+    }
+}
+
+function clearCart() {
+    if (cart.length === 0) return;
+    if (confirm('Are you sure you want to clear the cart?')) {
+        cart = [];
+        saveCart();
+        renderCart();
+        updateCartCount();
+    }
+}
+
+function renderCart() {
+    const cartItems = document.getElementById('cartItems');
+    const cartTotal = document.getElementById('cartTotal');
+    
+    // Check if user is logged in
+    if (!currentUser) {
+        cartItems.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">Please login to view and manage your cart.<br><button onclick="document.getElementById(\'loginModal\').classList.remove(\'hidden\')" class="btn btn-primary" style="margin-top: 10px;">Login</button></p>';
+        cartTotal.textContent = '0.00';
+        // Clear cart if not logged in
+        cart = [];
+        saveCart();
+        updateCartCount();
+        return;
+    }
+    
+    if (cart.length === 0) {
+        cartItems.innerHTML = '<p style="text-align: center; color: #999;">Your cart is empty</p>';
+        cartTotal.textContent = '0.00';
+        return;
+    }
+
+    cartItems.innerHTML = '';
+    cart.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+
+        const cartItem = document.createElement('div');
+        cartItem.className = 'cart-item';
+        cartItem.innerHTML = `
+            <div class="cart-item-info">
+                <h4>${item.name}</h4>
+                <p>â‚¹${item.price.toFixed(2)} Ã— ${item.quantity} = â‚¹${itemTotal.toFixed(2)}</p>
+                ${item.hasTax && item.gstPercentage > 0 ? `<p style="font-size: 11px; color: #666;">GST ${item.gstPercentage}%</p>` : ''}
+            </div>
+            <div class="cart-item-controls">
+                <button class="quantity-btn" onclick="updateQuantity(${item.id}, -1)">-</button>
+                <span class="quantity">${item.quantity}</span>
+                <button class="quantity-btn" onclick="updateQuantity(${item.id}, 1)">+</button>
+                <button class="remove-btn" onclick="removeFromCart(${item.id})">Remove</button>
+            </div>
+        `;
+        cartItems.appendChild(cartItem);
+    });
+
+    const subtotal = calculateSubtotal();
+    const tax = calculateTax();
+    const total = calculateTotal();
+    
+    const cartSubtotal = document.getElementById('cartSubtotal');
+    const cartSubtotalAmount = document.getElementById('cartSubtotalAmount');
+    const cartTax = document.getElementById('cartTax');
+    const cartTaxAmount = document.getElementById('cartTaxAmount');
+    
+    if (tax > 0) {
+        if (cartSubtotal) {
+            cartSubtotal.style.display = 'block';
+        }
+        if (cartSubtotalAmount) {
+            cartSubtotalAmount.textContent = subtotal.toFixed(2);
+        }
+        if (cartTax) {
+            cartTax.style.display = 'block';
+        }
+        if (cartTaxAmount) {
+            cartTaxAmount.textContent = tax.toFixed(2);
+        }
+    } else {
+        if (cartSubtotal) {
+            cartSubtotal.style.display = 'none';
+        }
+        if (cartTax) {
+            cartTax.style.display = 'none';
+        }
+    }
+    
+    cartTotal.textContent = total.toFixed(2);
+}
+
+function updateCartCount() {
+    const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const cartCountElement = document.getElementById('cartCount');
+    if (cartCountElement) {
+        cartCountElement.textContent = count;
+    }
+}
+
+function switchCartTab(tab) {
+    const currentTab = document.getElementById('currentCartTab');
+    const previousTab = document.getElementById('previousBillsTab');
+    const currentContent = document.getElementById('currentCartContent');
+    const previousContent = document.getElementById('previousBillsContent');
+    
+    if (tab === 'current') {
+        currentTab.classList.add('active');
+        previousTab.classList.remove('active');
+        currentContent.classList.add('active');
+        previousContent.classList.remove('active');
+    } else {
+        previousTab.classList.add('active');
+        currentTab.classList.remove('active');
+        previousContent.classList.add('active');
+        currentContent.classList.remove('active');
+        loadPreviousBills();
+    }
+}
+
+function loadPreviousBills() {
+    const previousBillsList = document.getElementById('previousBillsList');
+    if (!previousBillsList) return;
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    
+    if (orders.length === 0) {
+        previousBillsList.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No previous bills found.</p>';
+        return;
+    }
+    
+    // Sort orders by date (newest first)
+    const sortedOrders = orders.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    previousBillsList.innerHTML = '';
+    
+    sortedOrders.forEach(order => {
+        const billItem = document.createElement('div');
+        billItem.className = 'previous-bill-item';
+        billItem.onclick = () => previewPreviousBill(order);
+        
+        const orderDate = new Date(order.date).toLocaleString();
+        const paymentMethod = order.paymentMethod || 'N/A';
+        const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+        
+        billItem.innerHTML = `
+            <div class="previous-bill-item-header">
+                <div>
+                    <div class="previous-bill-item-id">Order #${order.id}</div>
+                    <div class="previous-bill-item-date">${orderDate}</div>
+                </div>
+                <div class="previous-bill-item-total">â‚¹${order.total.toFixed(2)}</div>
+            </div>
+            <div class="previous-bill-item-payment">Payment: ${paymentMethodLabel}</div>
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                ${order.items.length} item(s)
+            </div>
+        `;
+        
+        previousBillsList.appendChild(billItem);
+    });
+}
+
+function previewPreviousBill(order) {
+    currentPreviewOrder = order;
+    
+    const modal = document.getElementById('previousBillModal');
+    const content = document.getElementById('previousBillContent');
+    
+    if (!modal || !content) return;
+    
+    // Get restaurant info
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    const restaurantAddress = restaurantInfo.address || '';
+    
+    // Format date
+    const orderDate = new Date(order.date).toLocaleString();
+    const paymentMethod = order.paymentMethod || 'N/A';
+    const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+    
+    // Build bill HTML with all details
+    let itemsHtml = '';
+    order.items.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        itemsHtml += `
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;">
+                <div>
+                    <strong>${item.name}</strong>
+                    <div style="font-size: 12px; color: #666;">â‚¹${item.price.toFixed(2)} Ã— ${item.quantity}</div>
+                </div>
+                <div style="font-weight: bold;">â‚¹${itemTotal.toFixed(2)}</div>
+            </div>
+        `;
+    });
+    
+    // Show all details like print bill preview
+    content.innerHTML = `
+        <div style="padding: 20px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 5px 0;">${restaurantName}</h3>
+                ${restaurantAddress ? `<p style="margin: 0; color: #666; font-size: 14px;">${restaurantAddress}</p>` : ''}
+            </div>
+            <div style="border-top: 2px solid #333; border-bottom: 2px solid #333; padding: 15px 0; margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                    <span><strong>Order #:</strong></span>
+                    <span>${order.id}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                    <span><strong>Date:</strong></span>
+                    <span>${orderDate}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span><strong>Payment Method:</strong></span>
+                    <span>${paymentMethodLabel}</span>
+                </div>
+            </div>
+            <div style="margin: 20px 0;">
+                <h4 style="margin-bottom: 15px;">Items:</h4>
+                ${itemsHtml}
+            </div>
+        </div>
+    `;
+    
+    // Update total amount in the footer (if it exists)
+    const totalElement = document.getElementById('previousBillTotal');
+    if (totalElement) {
+        totalElement.textContent = `Total: â‚¹${order.total.toFixed(2)}`;
+    }
+    
+    // Show/hide cancel button based on admin status
+    const cancelBtn = document.getElementById('cancelPreviousBillBtn');
+    if (cancelBtn) {
+        cancelBtn.classList.toggle('hidden', !isAdmin);
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+function saveCart() {
+    localStorage.setItem('cart', JSON.stringify(cart));
+}
+
+function calculateTotal() {
+    const subtotal = cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const tax = calculateTax();
+    return subtotal + tax;
+}
+
+function calculateSubtotal() {
+    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+}
+
+function calculateTax() {
+    let totalTax = 0;
+    cart.forEach(item => {
+        if (item.hasTax && item.gstPercentage > 0) {
+            const itemSubtotal = item.price * item.quantity;
+            const itemTax = (itemSubtotal * item.gstPercentage) / 100;
+            totalTax += itemTax;
+        }
+    });
+    return totalTax;
+}
+
+// Login Functions
+function handleLogin() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value.trim();
+    
+    if (!username || !password) {
+        alert('Please enter both username and password!');
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const user = users.find(u => u.username === username && u.password === password);
+    
+    if (!user) {
+        alert('Invalid username or password!');
+        return;
+    }
+    
+    // Set current user
+    currentUser = user;
+    isAdmin = user.role === 'admin';
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+    
+    // Update UI
+    updateUserDisplay();
+    
+    // Refresh cart display after login
+    renderCart();
+    
+    // Close login modal
+    document.getElementById('loginModal').classList.add('hidden');
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
+    
+    alert(`Welcome, ${user.username}! You are logged in as ${user.role === 'admin' ? 'Admin' : 'User'}.`);
+}
+
+// User Management Functions
+function updateUserDisplay() {
+    const userDisplay = document.getElementById('currentUserDisplay');
+    const userRole = document.getElementById('currentUserRole');
+    const cancelBtn = document.getElementById('cancelPreviousBillBtn');
+    
+    // Update admin section display
+    if (userDisplay) {
+        userDisplay.textContent = currentUser ? currentUser.username : 'Guest';
+    }
+    if (userRole) {
+        userRole.textContent = currentUser ? currentUser.role : 'Guest';
+    }
+    if (cancelBtn) {
+        cancelBtn.classList.toggle('hidden', !isAdmin);
+    }
+    
+    // Update header user display
+    const headerUserInfo = document.getElementById('userInfoDisplay');
+    const headerUserName = document.getElementById('headerUserName');
+    const headerUserRole = document.getElementById('headerUserRole');
+    const loginBtn = document.getElementById('loginBtn');
+    
+    if (currentUser) {
+        // Show user info in header
+        if (headerUserInfo) {
+            headerUserInfo.style.display = 'block';
+        }
+        if (headerUserName) {
+            headerUserName.textContent = currentUser.username;
+        }
+        if (headerUserRole) {
+            headerUserRole.textContent = currentUser.role === 'admin' ? 'Admin' : 'User';
+        }
+        // Change login button to show logout option
+        if (loginBtn) {
+            loginBtn.textContent = 'Logout';
+        }
+    } else {
+        // Hide user info in header
+        if (headerUserInfo) {
+            headerUserInfo.style.display = 'none';
+        }
+        // Change logout button back to login
+        if (loginBtn) {
+            loginBtn.textContent = 'Login';
+        }
+    }
+    
+    loadUsersList();
+}
+
+function adminLogin() {
+    const username = document.getElementById('adminUsername').value.trim();
+    const password = document.getElementById('adminPassword').value;
+    
+    if (!username || !password) {
+        alert('Please enter username and password!');
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const user = users.find(u => u.username === username && u.password === password);
+    
+    if (user) {
+        currentUser = { id: user.id, username: user.username, role: user.role };
+        isAdmin = user.role === 'admin';
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+        updateUserDisplay();
+        document.getElementById('adminLoginModal').classList.add('hidden');
+        document.getElementById('adminUsername').value = '';
+        document.getElementById('adminPassword').value = '';
+        if (isAdmin) {
+            showAdmin();
+        } else {
+            alert('Login successful! You are logged in as a regular user.');
+        }
+    } else {
+        alert('Invalid username or password!');
+    }
+}
+
+function logout() {
+    // Clear cart on logout
+    cart = [];
+    saveCart();
+    renderCart();
+    updateCartCount();
+    
+    currentUser = null;
+    isAdmin = false;
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    updateUserDisplay();
+    document.getElementById('adminSection').classList.add('hidden');
+    alert('Logged out successfully!');
+}
+
+function addUser() {
+    if (!isAdmin) {
+        alert('Only admins can add users!');
+        return;
+    }
+    
+    const username = document.getElementById('newUsername').value.trim();
+    const password = document.getElementById('newPassword').value;
+    const role = document.getElementById('userRole').value;
+    
+    if (!username || !password) {
+        alert('Please enter username and password!');
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    
+    // Check if username already exists
+    if (users.find(u => u.username === username)) {
+        alert('Username already exists!');
+        return;
+    }
+    
+    const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
+    users.push({
+        id: newId,
+        username: username,
+        password: password,
+        role: role
+    });
+    
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('userRole').value = 'user';
+    
+    loadUsersList();
+    alert('User added successfully!');
+}
+
+function loadUsersList() {
+    const usersListContent = document.getElementById('usersListContent');
+    if (!usersListContent) return;
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    
+    if (users.length === 0) {
+        usersListContent.innerHTML = '<p>No users found.</p>';
+        return;
+    }
+    
+    usersListContent.innerHTML = users.map(user => `
+        <div style="padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <strong>${user.username}</strong> (${user.role})
+            </div>
+            ${isAdmin ? `
+                <div style="display: flex; gap: 5px;">
+                    <button class="btn btn-edit" onclick="editUser(${user.id})" style="padding: 5px 10px; font-size: 12px;">Edit</button>
+                    <button class="btn btn-delete" onclick="deleteUser(${user.id})" style="padding: 5px 10px; font-size: 12px;">Delete</button>
+                </div>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+let editingUserId = null;
+
+function editUser(userId) {
+    if (!isAdmin) {
+        alert('Only admins can edit users!');
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+        alert('User not found!');
+        return;
+    }
+    
+    editingUserId = userId;
+    document.getElementById('editUsername').value = user.username;
+    document.getElementById('editUserRole').value = user.role;
+    document.getElementById('editUserPassword').value = '';
+    document.getElementById('confirmEditPassword').value = '';
+    
+    document.getElementById('editUserModal').classList.remove('hidden');
+}
+
+function saveUserChanges() {
+    if (!isAdmin) {
+        alert('Only admins can edit users!');
+        return;
+    }
+    
+    if (!editingUserId) {
+        alert('No user selected for editing!');
+        return;
+    }
+    
+    const username = document.getElementById('editUsername').value.trim();
+    const role = document.getElementById('editUserRole').value;
+    const newPassword = document.getElementById('editUserPassword').value;
+    const confirmPassword = document.getElementById('confirmEditPassword').value;
+    
+    if (!username) {
+        alert('Username is required!');
+        return;
+    }
+    
+    // If password is provided, validate it
+    if (newPassword) {
+        if (newPassword.length < 3) {
+            alert('Password must be at least 3 characters long!');
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            alert('Passwords do not match!');
+            return;
+        }
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const userIndex = users.findIndex(u => u.id === editingUserId);
+    
+    if (userIndex === -1) {
+        alert('User not found!');
+        return;
+    }
+    
+    // Check if username is already taken by another user
+    const existingUser = users.find(u => u.username === username && u.id !== editingUserId);
+    if (existingUser) {
+        alert('Username already exists!');
+        return;
+    }
+    
+    // Update user
+    users[userIndex].username = username;
+    users[userIndex].role = role;
+    if (newPassword) {
+        users[userIndex].password = newPassword;
+    }
+    
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    
+    // If current user was edited, update current user data
+    if (currentUser && currentUser.id === editingUserId) {
+        currentUser.username = username;
+        currentUser.role = role;
+        isAdmin = role === 'admin';
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+        updateUserDisplay();
+    }
+    
+    loadUsersList();
+    closeEditUserModal();
+    alert('User updated successfully!');
+}
+
+function resetUserPassword() {
+    if (!isAdmin) {
+        alert('Only admins can reset passwords!');
+        return;
+    }
+    
+    if (!editingUserId) {
+        alert('No user selected!');
+        return;
+    }
+    
+    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const user = users.find(u => u.id === editingUserId);
+    
+    if (!user) {
+        alert('User not found!');
+        return;
+    }
+    
+    // Generate a default password (username + "123")
+    const defaultPassword = user.username + '123';
+    
+    if (confirm(`Reset password for ${user.username} to "${defaultPassword}"?`)) {
+        const userIndex = users.findIndex(u => u.id === editingUserId);
+        users[userIndex].password = defaultPassword;
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        
+        // Update password fields in modal
+        document.getElementById('editUserPassword').value = defaultPassword;
+        document.getElementById('confirmEditPassword').value = defaultPassword;
+        
+        alert(`Password reset successfully! New password: ${defaultPassword}`);
+    }
+}
+
+function closeEditUserModal() {
+    editingUserId = null;
+    document.getElementById('editUserModal').classList.add('hidden');
+    document.getElementById('editUsername').value = '';
+    document.getElementById('editUserRole').value = 'user';
+    document.getElementById('editUserPassword').value = '';
+    document.getElementById('confirmEditPassword').value = '';
+}
+
+function deleteUser(userId) {
+    if (!isAdmin) {
+        alert('Only admins can delete users!');
+        return;
+    }
+    
+    if (confirm('Are you sure you want to delete this user?')) {
+        const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+        const filteredUsers = users.filter(u => u.id !== userId);
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filteredUsers));
+        loadUsersList();
+        alert('User deleted successfully!');
+    }
+}
+
+function cancelBill() {
+    if (!isAdmin) {
+        alert('Only admins can cancel bills!');
+        return;
+    }
+    
+    if (!currentPreviewOrder) {
+        alert('No bill selected to cancel!');
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to cancel Order #${currentPreviewOrder.id}? This action cannot be undone.`)) {
+        // Add cancellation timestamp
+        const cancelledOrder = {
+            ...currentPreviewOrder,
+            cancelledDate: new Date().toISOString(),
+            cancelledBy: currentUser ? currentUser.username : 'Admin'
+        };
+        
+        // Save to cancelled orders
+        const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+        cancelledOrders.push(cancelledOrder);
+        localStorage.setItem(STORAGE_KEYS.CANCELLED_ORDERS, JSON.stringify(cancelledOrders));
+        
+        // Remove from active orders
+        const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+        const filteredOrders = orders.filter(o => o.id !== currentPreviewOrder.id);
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(filteredOrders));
+        
+        // Close modal
+        document.getElementById('previousBillModal').classList.add('hidden');
+        currentPreviewOrder = null;
+        
+        // Reload previous bills
+        loadPreviousBills();
+        
+        // Reload cancelled bills in sales report
+        loadCancelledBills();
+        
+        alert('Bill cancelled successfully!');
+    }
+}
+
+// Cancel Bill Functions
+function showCancelBillSection() {
+    if (!isAdmin) {
+        alert('Only admins can access Cancel Bill section!');
+        document.getElementById('adminLoginModal').classList.remove('hidden');
+        return;
+    }
+    
+    document.getElementById('cancelBillSection').classList.remove('hidden');
+    
+    // Set default date range (last 30 days)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    
+    document.getElementById('cancelBillStartDate').value = startDate.toISOString().split('T')[0];
+    document.getElementById('cancelBillEndDate').value = endDate.toISOString().split('T')[0];
+    
+    // Clear previous results
+    document.getElementById('cancelBillResults').innerHTML = '';
+    document.getElementById('cancelBillTransactionDetails').classList.add('hidden');
+    document.getElementById('cancelBillOrderSearch').value = '';
+    
+    // Load transaction history
+    loadCancelBillTransactionHistory();
+}
+
+function searchCancelBillByNumber() {
+    const orderNumber = document.getElementById('cancelBillOrderSearch').value.trim();
+    
+    if (!orderNumber) {
+        alert('Please enter an order number!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    
+    // Search in both active and cancelled orders
+    let order = orders.find(o => String(o.id) === orderNumber);
+    let isCancelled = false;
+    
+    if (!order) {
+        order = cancelledOrders.find(o => String(o.id) === orderNumber);
+        isCancelled = true;
+    }
+    
+    if (!order) {
+        document.getElementById('cancelBillResults').innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">Order not found.</p>';
+        document.getElementById('cancelBillTransactionDetails').classList.add('hidden');
+        return;
+    }
+    
+    // Mark order as cancelled if found in cancelled orders
+    const orderWithStatus = { ...order, isCancelled: isCancelled };
+    displayCancelBillResult([orderWithStatus]);
+    showCancelBillTransactionDetails(orderWithStatus);
+}
+
+function searchCancelBillByDate() {
+    const startDate = document.getElementById('cancelBillStartDate').value;
+    const endDate = document.getElementById('cancelBillEndDate').value;
+    
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates!');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        alert('Start date must be before end date!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    
+    // Filter orders by date range (check original date for both active and cancelled)
+    const filteredActiveOrders = orders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+            
+            const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+            const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+            
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            console.error('Error filtering order:', error, order);
+            return false;
+        }
+    }).map(o => ({ ...o, isCancelled: false }));
+    
+    const filteredCancelledOrders = cancelledOrders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+            
+            const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+            const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+            
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            console.error('Error filtering cancelled order:', error, order);
+            return false;
+        }
+    }).map(o => ({ ...o, isCancelled: true }));
+    
+    const filteredOrders = [...filteredActiveOrders, ...filteredCancelledOrders];
+    
+    if (filteredOrders.length === 0) {
+        document.getElementById('cancelBillResults').innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No orders found for the selected date range.</p>';
+        document.getElementById('cancelBillTransactionDetails').classList.add('hidden');
+        return;
+    }
+    
+    displayCancelBillResult(filteredOrders);
+    document.getElementById('cancelBillTransactionDetails').classList.add('hidden');
+}
+
+function displayCancelBillResult(orders) {
+    const resultsDiv = document.getElementById('cancelBillResults');
+    resultsDiv.innerHTML = '';
+    
+    // Sort by date (newest first)
+    const sortedOrders = orders.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    table.style.marginTop = '20px';
+    table.innerHTML = `
+        <thead>
+            <tr style="background-color: #f0f0f0;">
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Order #</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Date</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Payment</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Total</th>
+                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${sortedOrders.map(order => {
+                const orderDate = new Date(order.date).toLocaleString();
+                const paymentMethod = order.paymentMethod || 'N/A';
+                const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+                return `
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${order.id}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${orderDate}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${paymentMethodLabel}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${order.total.toFixed(2)}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
+                            <button class="btn btn-primary" onclick="viewCancelBillDetails(${order.id})" style="padding: 5px 10px; font-size: 12px; margin-right: 5px;">View</button>
+                            <button class="btn btn-danger" onclick="cancelBillFromList(${order.id})" style="padding: 5px 10px; font-size: 12px;">Cancel</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('')}
+        </tbody>
+    `;
+    
+    resultsDiv.appendChild(table);
+}
+
+function viewCancelBillDetails(orderId) {
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    
+    // Search in both active and cancelled orders
+    let order = orders.find(o => o.id === orderId);
+    let isCancelled = false;
+    
+    if (!order) {
+        order = cancelledOrders.find(o => o.id === orderId);
+        isCancelled = true;
+    }
+    
+    if (order) {
+        const orderWithStatus = { ...order, isCancelled: isCancelled };
+        showCancelBillTransactionDetails(orderWithStatus);
+    }
+}
+
+function showCancelBillTransactionDetails(order) {
+    const detailsDiv = document.getElementById('cancelBillTransactionContent');
+    const detailsSection = document.getElementById('cancelBillTransactionDetails');
+    
+    if (!detailsDiv || !detailsSection) return;
+    
+    const orderDate = new Date(order.date).toLocaleString();
+    const isCancelled = order.isCancelled || false;
+    const cancelledDate = isCancelled && order.cancelledDate ? new Date(order.cancelledDate).toLocaleString() : null;
+    const cancelledBy = isCancelled ? (order.cancelledBy || 'Admin') : null;
+    const paymentMethod = order.paymentMethod || 'N/A';
+    const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+    
+    let itemsHtml = '';
+    order.items.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        itemsHtml += `
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                <div>
+                    <strong>${item.name}</strong>
+                    <div style="font-size: 12px; color: #666;">â‚¹${item.price.toFixed(2)} Ã— ${item.quantity}</div>
+                </div>
+                <div style="font-weight: bold;">â‚¹${itemTotal.toFixed(2)}</div>
+            </div>
+        `;
+    });
+    
+    detailsDiv.innerHTML = `
+        <div style="padding: 20px; background: ${isCancelled ? '#ffebee' : '#f9f9f9'}; border-radius: 5px; border: 2px solid ${isCancelled ? '#ef5350' : '#ddd'};">
+            <div style="margin-bottom: 15px;">
+                <p><strong>Order #:</strong> ${order.id}${isCancelled ? ' <span style="color: #d32f2f; font-weight: bold;">(Cancelled)</span>' : ''}</p>
+                <p><strong>Date:</strong> ${orderDate}</p>
+                ${isCancelled && cancelledDate ? `<p><strong>Cancelled Date:</strong> ${cancelledDate}</p>` : ''}
+                ${isCancelled && cancelledBy ? `<p><strong>Cancelled By:</strong> ${cancelledBy}</p>` : ''}
+                <p><strong>Payment Method:</strong> ${paymentMethodLabel}</p>
+                <p><strong>Status:</strong> <span style="color: ${isCancelled ? '#d32f2f' : '#4CAF50'}; font-weight: bold;">${isCancelled ? 'Cancelled' : 'Active'}</span></p>
+            </div>
+            <div style="margin: 15px 0;">
+                <h4>Items:</h4>
+                ${itemsHtml}
+            </div>
+            <div style="border-top: 2px solid #333; padding-top: 15px; margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
+                    <span>Total Amount:</span>
+                    <span style="color: ${isCancelled ? '#d32f2f' : '#333'};">â‚¹${order.total.toFixed(2)}</span>
+                </div>
+            </div>
+            ${!isCancelled ? `
+                <div style="margin-top: 20px; text-align: center;">
+                    <button class="btn btn-danger" onclick="cancelBillFromList(${order.id})">Cancel This Bill</button>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    detailsSection.classList.remove('hidden');
+}
+
+function cancelBillFromList(orderId) {
+    if (!isAdmin) {
+        alert('Only admins can cancel bills!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const order = orders.find(o => o.id === orderId);
+    
+    if (!order) {
+        alert('Order not found!');
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to cancel Order #${order.id}? This action cannot be undone.`)) {
+        // Add cancellation timestamp
+        const cancelledOrder = {
+            ...order,
+            cancelledDate: new Date().toISOString(),
+            cancelledBy: currentUser ? currentUser.username : 'Admin'
+        };
+        
+        // Save to cancelled orders
+        const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+        cancelledOrders.push(cancelledOrder);
+        localStorage.setItem(STORAGE_KEYS.CANCELLED_ORDERS, JSON.stringify(cancelledOrders));
+        
+        // Remove from active orders
+        const filteredOrders = orders.filter(o => o.id !== orderId);
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(filteredOrders));
+        
+        // Refresh the display
+        const orderSearch = document.getElementById('cancelBillOrderSearch').value.trim();
+        if (orderSearch) {
+            searchCancelBillByNumber();
+        } else {
+            searchCancelBillByDate();
+        }
+        
+        // Also reload previous bills if on that tab
+        loadPreviousBills();
+        
+        // Reload transaction history
+        loadCancelBillTransactionHistory();
+        
+        // Reload cancelled bills in sales report
+        loadCancelledBills();
+        
+        alert('Bill cancelled successfully!');
+    }
+}
+
+function loadCancelBillTransactionHistory() {
+    const historyContent = document.getElementById('cancelBillTransactionHistoryContent');
+    if (!historyContent) return;
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    
+    // Combine active and cancelled orders, mark cancelled ones
+    const allOrders = [
+        ...orders.map(o => ({ ...o, isCancelled: false })),
+        ...cancelledOrders.map(o => ({ ...o, isCancelled: true }))
+    ];
+    
+    if (allOrders.length === 0) {
+        historyContent.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No transaction history found.</p>';
+        return;
+    }
+    
+    // Sort by date (newest first)
+    const sortedOrders = allOrders.sort((a, b) => {
+        const dateA = a.isCancelled && a.cancelledDate ? new Date(a.cancelledDate) : new Date(a.date);
+        const dateB = b.isCancelled && b.cancelledDate ? new Date(b.cancelledDate) : new Date(b.date);
+        return dateB - dateA;
+    });
+    
+    historyContent.innerHTML = '';
+    
+    sortedOrders.forEach(order => {
+        const orderDiv = document.createElement('div');
+        orderDiv.className = 'transaction-item';
+        
+        if (order.isCancelled) {
+            // Styling for cancelled transactions
+            orderDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: #ffebee; border: 1px solid #ef5350; border-radius: 5px; cursor: pointer; transition: all 0.3s ease;';
+            orderDiv.onmouseover = function() {
+                this.style.background = '#ffcdd2';
+                this.style.borderColor = '#e53935';
+            };
+            orderDiv.onmouseout = function() {
+                this.style.background = '#ffebee';
+                this.style.borderColor = '#ef5350';
+            };
+        } else {
+            // Styling for active transactions
+            orderDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; transition: all 0.3s ease;';
+            orderDiv.onmouseover = function() {
+                this.style.background = '#e8f5e9';
+                this.style.borderColor = '#4CAF50';
+            };
+            orderDiv.onmouseout = function() {
+                this.style.background = '#f9f9f9';
+                this.style.borderColor = '#ddd';
+            };
+        }
+        
+        orderDiv.onclick = () => {
+            viewCancelBillDetails(order.id);
+        };
+        
+        const orderDate = new Date(order.date).toLocaleString();
+        const cancelledDate = order.isCancelled && order.cancelledDate ? new Date(order.cancelledDate).toLocaleString() : null;
+        const cancelledBy = order.isCancelled ? (order.cancelledBy || 'Admin') : null;
+        const paymentMethod = order.paymentMethod || 'N/A';
+        const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+        
+        orderDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div>
+                    <strong style="font-size: 16px; color: ${order.isCancelled ? '#c62828' : '#333'};">
+                        Order #${order.id}${order.isCancelled ? ' (Cancelled)' : ''}
+                    </strong>
+                    <div style="font-size: 12px; color: #666; margin-top: 3px;">${orderDate}</div>
+                    ${order.isCancelled && cancelledDate ? `
+                        <div style="font-size: 11px; color: #d32f2f; margin-top: 3px;">
+                            Cancelled: ${cancelledDate}${cancelledBy ? ` by ${cancelledBy}` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 18px; font-weight: bold; color: ${order.isCancelled ? '#d32f2f' : '#4CAF50'};">
+                        â‚¹${order.total.toFixed(2)}
+                    </div>
+                    <div style="font-size: 12px; color: #666; margin-top: 3px;">${paymentMethodLabel}</div>
+                </div>
+            </div>
+            <div style="font-size: 13px; color: #666; border-top: 1px solid ${order.isCancelled ? '#ffcdd2' : '#eee'}; padding-top: 8px; margin-top: 8px;">
+                ${order.items.length} item(s): ${order.items.map(item => `${item.name} (${item.quantity}x)`).join(', ')}
+            </div>
+        `;
+        
+        historyContent.appendChild(orderDiv);
+    });
+}
+
+// Admin Functions
+function showAdmin() {
+    if (!isAdmin) {
+        document.getElementById('adminLoginModal').classList.remove('hidden');
+        return;
+    }
+    document.getElementById('adminSection').classList.remove('hidden');
+    loadRestaurantInfo();
+    loadUsersList();
+}
+
+function loadRestaurantInfo() {
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    
+    // Update form fields
+    if (document.getElementById('restaurantName')) {
+        document.getElementById('restaurantName').value = restaurantInfo.name || '';
+    }
+    if (document.getElementById('restaurantAddress')) {
+        document.getElementById('restaurantAddress').value = restaurantInfo.address || '';
+    }
+    
+    // Load QR code if exists
+    if (restaurantInfo.qrCode) {
+        qrCodeBase64 = restaurantInfo.qrCode;
+        qrCodeRemoved = false;
+        if (document.getElementById('qrCodePreviewImage')) {
+            document.getElementById('qrCodePreviewImage').src = qrCodeBase64;
+            document.getElementById('qrCodePreview').classList.remove('hidden');
+        }
+    } else {
+        qrCodeBase64 = null;
+        qrCodeRemoved = false;
+    }
+    
+    // Update header title
+    const restaurantTitle = document.getElementById('restaurantTitle');
+    if (restaurantInfo.name) {
+        restaurantTitle.textContent = `ðŸ½ï¸ ${restaurantInfo.name}`;
+    } else {
+        restaurantTitle.textContent = 'ðŸ½ï¸ Restaurant Menu';
+    }
+    
+    // Update QR code in modal if it exists
+    updateQRCodeInModal();
+}
+
+function handleQRCodeSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please select an image file!');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        qrCodeBase64 = e.target.result;
+        qrCodeRemoved = false;
+        document.getElementById('qrCodePreviewImage').src = qrCodeBase64;
+        document.getElementById('qrCodePreview').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+}
+
+function removeQRCodePreview() {
+    qrCodeBase64 = null;
+    qrCodeRemoved = true;
+    document.getElementById('qrCodeFile').value = '';
+    document.getElementById('qrCodePreviewImage').src = '';
+    document.getElementById('qrCodePreview').classList.add('hidden');
+}
+
+function updateQRCodeInModal() {
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const qrCodeImage = document.getElementById('qrCodeImage');
+    if (qrCodeImage && restaurantInfo.qrCode) {
+        qrCodeImage.src = restaurantInfo.qrCode;
+    } else if (qrCodeImage) {
+        qrCodeImage.src = 'images/qr-placeholder.png';
+    }
+}
+
+function saveRestaurantInfo() {
+    const name = document.getElementById('restaurantName').value.trim();
+    const address = document.getElementById('restaurantAddress').value.trim();
+    
+    const restaurantInfo = {
+        name: name,
+        address: address
+    };
+    
+    // Save QR code if uploaded
+    if (qrCodeBase64) {
+        restaurantInfo.qrCode = qrCodeBase64;
+    } else if (qrCodeRemoved) {
+        // QR code was explicitly removed, don't save it
+        restaurantInfo.qrCode = null;
+    } else {
+        // Keep existing QR code if not removed and no new one uploaded
+        const existingInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+        if (existingInfo.qrCode) {
+            restaurantInfo.qrCode = existingInfo.qrCode;
+        }
+    }
+    
+    localStorage.setItem(STORAGE_KEYS.RESTAURANT_INFO, JSON.stringify(restaurantInfo));
+    
+    // Reset removal flag
+    qrCodeRemoved = false;
+    
+    // Update header
+    const restaurantTitle = document.getElementById('restaurantTitle');
+    if (name) {
+        restaurantTitle.textContent = `ðŸ½ï¸ ${name}`;
+    } else {
+        restaurantTitle.textContent = 'ðŸ½ï¸ Restaurant Menu';
+    }
+    
+    // Update QR code in modal
+    updateQRCodeInModal();
+    
+    alert('Restaurant information saved successfully!');
+}
+
+// Menu Management
+function showMenuManagement() {
+    document.getElementById('menuManagementSection').classList.remove('hidden');
+    editingItemId = null;
+    removeImagePreview();
+    // Clear form
+    document.getElementById('itemName').value = '';
+    document.getElementById('itemBarcode').value = '';
+    document.getElementById('itemPrice').value = '';
+    document.getElementById('itemImageFile').value = '';
+    document.getElementById('itemTax').value = 'no';
+    document.getElementById('gstPercentageGroup').classList.add('hidden');
+    document.getElementById('itemGstPercentage').value = '';
+    renderManagementMenu();
+}
+
+function renderManagementMenu() {
+    const managementList = document.getElementById('managementMenuList');
+    managementList.innerHTML = '';
+
+    menuItems.forEach(item => {
+        const menuItem = document.createElement('div');
+        menuItem.className = 'management-menu-item';
+        menuItem.innerHTML = `
+            <div class="management-menu-item-info">
+                <h4>${item.name}</h4>
+                <p>Barcode: ${item.barcode || 'N/A'}</p>
+                <p>â‚¹${item.price.toFixed(2)}</p>
+            </div>
+            <div class="management-menu-item-actions">
+                <button class="btn btn-edit" onclick="editMenuItem(${item.id})">Edit</button>
+                <button class="btn btn-delete" onclick="deleteMenuItem(${item.id})">Delete</button>
+            </div>
+        `;
+        managementList.appendChild(menuItem);
+    });
+}
+
+function handleImageSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        alert('Please select an image file!');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        selectedImageBase64 = e.target.result;
+        document.getElementById('previewImage').src = selectedImageBase64;
+        document.getElementById('imagePreview').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+}
+
+function removeImagePreview() {
+    selectedImageBase64 = null;
+    document.getElementById('itemImageFile').value = '';
+    document.getElementById('previewImage').src = '';
+    document.getElementById('imagePreview').classList.add('hidden');
+}
+
+function addMenuItem() {
+    const name = document.getElementById('itemName').value.trim();
+    const price = parseFloat(document.getElementById('itemPrice').value);
+    const barcode = document.getElementById('itemBarcode').value.trim();
+    const hasTax = document.getElementById('itemTax').value === 'yes';
+    const gstPercentage = hasTax ? parseFloat(document.getElementById('itemGstPercentage').value) : 0;
+
+    if (!name || !price || price <= 0) {
+        alert('Please fill in all required fields with valid values!');
+        return;
+    }
+    
+    if (hasTax && (!gstPercentage || gstPercentage <= 0 || gstPercentage > 100)) {
+        alert('Please enter a valid GST percentage (0-100)!');
+        return;
+    }
+
+    // Use base64 image if selected, otherwise use default path
+    const image = selectedImageBase64 || `images/${name.toLowerCase()}.jpg`;
+    
+    // Generate barcode if not provided
+    const finalBarcode = barcode || String(1000 + (menuItems.length > 0 ? Math.max(...menuItems.map(i => i.id)) + 1 : 1));
+
+    if (editingItemId) {
+        // Update existing item
+        const item = menuItems.find(i => i.id === editingItemId);
+        if (item) {
+            item.name = name;
+            item.price = price;
+            item.barcode = barcode || item.barcode || String(1000 + item.id);
+            item.hasTax = hasTax;
+            item.gstPercentage = hasTax ? gstPercentage : 0;
+            if (selectedImageBase64) item.image = selectedImageBase64;
+        }
+        editingItemId = null;
+        document.getElementById('addItemBtn').textContent = 'Add Item';
+    } else {
+        // Add new item
+        const newId = menuItems.length > 0 ? Math.max(...menuItems.map(i => i.id)) + 1 : 1;
+        menuItems.push({
+            id: newId,
+            name: name,
+            price: price,
+            image: image,
+            barcode: finalBarcode,
+            hasTax: hasTax,
+            gstPercentage: hasTax ? gstPercentage : 0
+        });
+    }
+
+    // Save to localStorage
+    localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(menuItems));
+    
+    // Clear form
+    document.getElementById('itemName').value = '';
+    document.getElementById('itemBarcode').value = '';
+    document.getElementById('itemPrice').value = '';
+    document.getElementById('itemImageFile').value = '';
+    document.getElementById('itemTax').value = 'no';
+    document.getElementById('gstPercentageGroup').classList.add('hidden');
+    document.getElementById('itemGstPercentage').value = '';
+    removeImagePreview();
+
+    // Re-render
+    renderMenu();
+    renderManagementMenu();
+}
+
+function editMenuItem(itemId) {
+    const item = menuItems.find(i => i.id === itemId);
+    if (!item) return;
+
+    document.getElementById('itemName').value = item.name;
+    document.getElementById('itemBarcode').value = item.barcode || '';
+    document.getElementById('itemPrice').value = item.price;
+    document.getElementById('itemImageFile').value = '';
+    
+    // Set tax fields
+    const hasTax = item.hasTax || false;
+    document.getElementById('itemTax').value = hasTax ? 'yes' : 'no';
+    if (hasTax) {
+        document.getElementById('gstPercentageGroup').classList.remove('hidden');
+        document.getElementById('itemGstPercentage').value = item.gstPercentage || 0;
+    } else {
+        document.getElementById('gstPercentageGroup').classList.add('hidden');
+        document.getElementById('itemGstPercentage').value = '';
+    }
+    
+    // Show image preview if it's a base64 image
+    if (item.image && item.image.startsWith('data:image')) {
+        selectedImageBase64 = item.image;
+        document.getElementById('previewImage').src = item.image;
+        document.getElementById('imagePreview').classList.remove('hidden');
+    } else {
+        removeImagePreview();
+    }
+    
+    editingItemId = itemId;
+    document.getElementById('addItemBtn').textContent = 'Update Item';
+}
+
+function deleteMenuItem(itemId) {
+    if (confirm('Are you sure you want to delete this item?')) {
+        menuItems = menuItems.filter(i => i.id !== itemId);
+        localStorage.setItem(STORAGE_KEYS.MENU_ITEMS, JSON.stringify(menuItems));
+        renderMenu();
+        renderManagementMenu();
+    }
+}
+
+// Payment & Billing
+function showQRModal() {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to make a payment!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        return;
+    }
+    
+    if (cart.length === 0) {
+        alert('Your cart is empty!');
+        return;
+    }
+
+    const total = calculateTotal();
+    document.getElementById('qrAmount').textContent = total.toFixed(2);
+    
+    // Update QR code image before showing modal
+    updateQRCodeInModal();
+    
+    // Reset payment modal to show payment method selection
+    resetPaymentModal();
+    
+    document.getElementById('qrModal').classList.remove('hidden');
+}
+
+function resetPaymentModal() {
+    document.getElementById('gpaySection').classList.add('hidden');
+    document.getElementById('cashSection').classList.add('hidden');
+}
+
+function showGPaySection() {
+    document.getElementById('gpaySection').classList.remove('hidden');
+    document.getElementById('cashSection').classList.add('hidden');
+}
+
+function showCashSection() {
+    document.getElementById('cashSection').classList.remove('hidden');
+    document.getElementById('gpaySection').classList.add('hidden');
+}
+
+function confirmCashPayment() {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to make a payment!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        document.getElementById('qrModal').classList.add('hidden');
+        return;
+    }
+    
+    if (cart.length === 0) {
+        alert('Your cart is empty!');
+        return;
+    }
+
+    const subtotal = calculateSubtotal();
+    const tax = calculateTax();
+    const total = calculateTotal();
+    const order = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        paymentMethod: 'cash',
+        userId: currentUser ? currentUser.id : null,
+        username: currentUser ? currentUser.username : 'Guest',
+        items: cart.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            hasTax: item.hasTax || false,
+            gstPercentage: item.gstPercentage || 0
+        })),
+        subtotal: subtotal,
+        tax: tax,
+        total: total
+    };
+
+    // Save order
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    orders.push(order);
+    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+
+    // Ask if user wants to print bill before closing
+    const printBill = confirm('Payment confirmed! Would you like to print the bill?');
+    
+    if (printBill) {
+        // Print bill before closing
+        printBillForOrder(order);
+    }
+
+    // Close modal immediately - hide the modal first
+    const qrModal = document.getElementById('qrModal');
+    if (qrModal) {
+        qrModal.classList.add('hidden');
+        qrModal.style.display = 'none';
+    }
+    resetPaymentModal();
+
+    // Clear cart after closing modal
+    cart = [];
+    saveCart();
+    renderCart();
+    updateCartCount();
+
+    // Show success message
+    if (!printBill) {
+        alert('Cash payment confirmed! Order saved.');
+    }
+}
+
+function confirmPayment() {
+    // Check if user is logged in
+    if (!currentUser) {
+        alert('Please login to make a payment!');
+        document.getElementById('loginModal').classList.remove('hidden');
+        document.getElementById('qrModal').classList.add('hidden');
+        return;
+    }
+    
+    if (cart.length === 0) {
+        alert('Your cart is empty!');
+        return;
+    }
+
+    const subtotal = calculateSubtotal();
+    const tax = calculateTax();
+    const total = calculateTotal();
+    const order = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        paymentMethod: 'gpay',
+        userId: currentUser ? currentUser.id : null,
+        username: currentUser ? currentUser.username : 'Guest',
+        items: cart.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            hasTax: item.hasTax || false,
+            gstPercentage: item.gstPercentage || 0
+        })),
+        subtotal: subtotal,
+        tax: tax,
+        total: total
+    };
+
+    // Save order
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    orders.push(order);
+    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+
+    // Ask if user wants to print bill before closing
+    const printBill = confirm('Payment confirmed! Would you like to print the bill?');
+    
+    if (printBill) {
+        // Print bill before closing
+        printBillForOrder(order);
+    }
+
+    // Close modal immediately - hide the modal first
+    const qrModal = document.getElementById('qrModal');
+    if (qrModal) {
+        qrModal.classList.add('hidden');
+        qrModal.style.display = 'none';
+    }
+    resetPaymentModal();
+
+    // Clear cart after closing modal
+    cart = [];
+    saveCart();
+    renderCart();
+    updateCartCount();
+
+    // Show success message
+    if (!printBill) {
+        alert('GPay payment confirmed! Order saved.');
+    }
+}
+
+function printBillForOrder(order) {
+    const printBillDiv = document.getElementById('printBill');
+    const billItemsBody = document.getElementById('billItemsBody');
+    const billTotal = document.getElementById('billTotal');
+    const billDate = document.getElementById('billDate');
+    const billOrderNumber = document.getElementById('billOrderNumber');
+    const billRestaurantName = document.getElementById('billRestaurantName');
+    const billRestaurantAddress = document.getElementById('billRestaurantAddress');
+
+    // Get restaurant info
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    if (billRestaurantName) {
+        billRestaurantName.textContent = restaurantInfo.name || 'Restaurant Bill';
+    }
+    if (billRestaurantAddress) {
+        billRestaurantAddress.textContent = restaurantInfo.address || '';
+        billRestaurantAddress.style.display = restaurantInfo.address ? 'block' : 'none';
+    }
+
+    // Set order number and date
+    if (billOrderNumber) {
+        billOrderNumber.textContent = order.id || 'Pending';
+    }
+    if (billDate) {
+        billDate.textContent = new Date(order.date).toLocaleString();
+    }
+
+    // Clear and populate bill items
+    if (billItemsBody) {
+        billItemsBody.innerHTML = '';
+    }
+
+    let subtotal = 0;
+    let totalTax = 0;
+    
+    order.items.forEach(item => {
+        const itemSubtotal = item.price * item.quantity;
+        subtotal += itemSubtotal;
+        
+        // Calculate tax for this item if applicable
+        let itemTax = 0;
+        if (item.hasTax && item.gstPercentage > 0) {
+            itemTax = (itemSubtotal * item.gstPercentage) / 100;
+            totalTax += itemTax;
+        }
+
+        // Create POS format item row
+        const itemRow = document.createElement('div');
+        itemRow.className = 'pos-item-row';
+        
+        // Truncate item name if too long for POS printer
+        const itemName = item.name.length > 20 ? item.name.substring(0, 17) + '...' : item.name;
+        
+        itemRow.innerHTML = `
+            <span class="pos-item-name">${itemName}</span>
+            <span class="pos-item-qty">${item.quantity}</span>
+            <span class="pos-item-price">â‚¹${item.price.toFixed(2)}</span>
+            <span class="pos-item-total">â‚¹${itemSubtotal.toFixed(2)}</span>
+        `;
+        if (billItemsBody) {
+            billItemsBody.appendChild(itemRow);
+        }
+    });
+
+    // Show/hide tax section based on whether there's tax
+    const billSubtotal = document.getElementById('billSubtotal');
+    const billSubtotalAmount = document.getElementById('billSubtotalAmount');
+    const billTax = document.getElementById('billTax');
+    const billTaxAmount = document.getElementById('billTaxAmount');
+    
+    if (totalTax > 0) {
+        if (billSubtotal) {
+            billSubtotal.style.display = 'block';
+        }
+        if (billSubtotalAmount) {
+            billSubtotalAmount.textContent = subtotal.toFixed(2);
+        }
+        if (billTax) {
+            billTax.style.display = 'block';
+        }
+        if (billTaxAmount) {
+            billTaxAmount.textContent = totalTax.toFixed(2);
+        }
+    } else {
+        if (billSubtotal) {
+            billSubtotal.style.display = 'none';
+        }
+        if (billTax) {
+            billTax.style.display = 'none';
+        }
+    }
+
+    if (billTotal) {
+        billTotal.textContent = order.total.toFixed(2);
+    }
+
+    // Show print bill and print
+    if (printBillDiv) {
+        printBillDiv.classList.remove('hidden');
+        
+        // Wait a bit for the content to render, then print
+        setTimeout(() => {
+            window.print();
+            // Hide after print dialog closes (or user cancels)
+            setTimeout(() => {
+                printBillDiv.classList.add('hidden');
+            }, 100);
+        }, 100);
+    }
+}
+
+function printBill() {
+    if (cart.length === 0) {
+        alert('Your cart is empty!');
+        return;
+    }
+
+    // Show preview modal first
+    showPrintBillPreview();
+}
+
+function showPrintBillPreview() {
+    const modal = document.getElementById('printBillPreviewModal');
+    const content = document.getElementById('printBillPreviewContent');
+    
+    if (!modal || !content) return;
+    
+    // Get restaurant info
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    const restaurantAddress = restaurantInfo.address || '';
+    
+    // Calculate totals
+    let subtotal = 0;
+    let totalTax = 0;
+    let itemsHtml = '';
+    
+    cart.forEach(item => {
+        const itemSubtotal = item.price * item.quantity;
+        subtotal += itemSubtotal;
+        
+        let itemTax = 0;
+        if (item.hasTax && item.gstPercentage > 0) {
+            itemTax = (itemSubtotal * item.gstPercentage) / 100;
+            totalTax += itemTax;
+        }
+        
+        itemsHtml += `
+            <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;">
+                <div>
+                    <strong>${item.name}</strong>
+                    <div style="font-size: 12px; color: #666;">â‚¹${item.price.toFixed(2)} Ã— ${item.quantity}</div>
+                    ${item.hasTax && item.gstPercentage > 0 ? `<div style="font-size: 11px; color: #999;">GST ${item.gstPercentage}%</div>` : ''}
+                </div>
+                <div style="font-weight: bold;">â‚¹${itemSubtotal.toFixed(2)}</div>
+            </div>
+        `;
+    });
+    
+    const total = subtotal + totalTax;
+    const orderDate = new Date().toLocaleString();
+    
+    content.innerHTML = `
+        <div style="padding: 20px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 5px 0;">${restaurantName}</h3>
+                ${restaurantAddress ? `<p style="margin: 0; color: #666; font-size: 14px;">${restaurantAddress}</p>` : ''}
+            </div>
+            <div style="border-top: 2px solid #333; border-bottom: 2px solid #333; padding: 15px 0; margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                    <span><strong>Date:</strong></span>
+                    <span>${orderDate}</span>
+                </div>
+            </div>
+            <div style="margin: 20px 0;">
+                <h4 style="margin-bottom: 15px;">Items:</h4>
+                ${itemsHtml}
+            </div>
+            ${totalTax > 0 ? `
+                <div style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 15px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Subtotal:</span>
+                        <span>â‚¹${subtotal.toFixed(2)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>GST:</span>
+                        <span>â‚¹${totalTax.toFixed(2)}</span>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Update total amount in the footer
+    const totalElement = document.getElementById('billPreviewTotal');
+    if (totalElement) {
+        totalElement.textContent = `Total: â‚¹${total.toFixed(2)}`;
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+function printBillDirect() {
+    const printBillDiv = document.getElementById('printBill');
+    const billItemsBody = document.getElementById('billItemsBody');
+    const billTotal = document.getElementById('billTotal');
+    const billDate = document.getElementById('billDate');
+    const billOrderNumber = document.getElementById('billOrderNumber');
+    const billRestaurantName = document.getElementById('billRestaurantName');
+    const billRestaurantAddress = document.getElementById('billRestaurantAddress');
+
+    // Get restaurant info
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    if (billRestaurantName) {
+        billRestaurantName.textContent = restaurantInfo.name || 'Restaurant Bill';
+    }
+    if (billRestaurantAddress) {
+        billRestaurantAddress.textContent = restaurantInfo.address || '';
+        billRestaurantAddress.style.display = restaurantInfo.address ? 'block' : 'none';
+    }
+
+    // Set order number and date
+    if (billOrderNumber) {
+        billOrderNumber.textContent = 'Pending';
+    }
+    if (billDate) {
+        billDate.textContent = new Date().toLocaleString();
+    }
+
+    // Clear and populate bill items
+    if (billItemsBody) {
+        billItemsBody.innerHTML = '';
+    }
+    let subtotal = 0;
+    let totalTax = 0;
+
+    cart.forEach(item => {
+        const itemSubtotal = item.price * item.quantity;
+        subtotal += itemSubtotal;
+        
+        // Calculate tax for this item if applicable
+        let itemTax = 0;
+        if (item.hasTax && item.gstPercentage > 0) {
+            itemTax = (itemSubtotal * item.gstPercentage) / 100;
+            totalTax += itemTax;
+        }
+
+        // Create POS format item row
+        const itemRow = document.createElement('div');
+        itemRow.className = 'pos-item-row';
+        
+        // Truncate item name if too long for POS printer
+        const itemName = item.name.length > 20 ? item.name.substring(0, 17) + '...' : item.name;
+        
+        itemRow.innerHTML = `
+            <span class="pos-item-name">${itemName}</span>
+            <span class="pos-item-qty">${item.quantity}</span>
+            <span class="pos-item-price">â‚¹${item.price.toFixed(2)}</span>
+            <span class="pos-item-total">â‚¹${itemSubtotal.toFixed(2)}</span>
+        `;
+        if (billItemsBody) {
+            billItemsBody.appendChild(itemRow);
+        }
+    });
+
+    // Show/hide tax section based on whether there's tax
+    const billSubtotal = document.getElementById('billSubtotal');
+    const billSubtotalAmount = document.getElementById('billSubtotalAmount');
+    const billTax = document.getElementById('billTax');
+    const billTaxAmount = document.getElementById('billTaxAmount');
+    
+    if (totalTax > 0) {
+        if (billSubtotal) {
+            billSubtotal.style.display = 'block';
+        }
+        if (billSubtotalAmount) {
+            billSubtotalAmount.textContent = subtotal.toFixed(2);
+        }
+        if (billTax) {
+            billTax.style.display = 'block';
+        }
+        if (billTaxAmount) {
+            billTaxAmount.textContent = totalTax.toFixed(2);
+        }
+    } else {
+        if (billSubtotal) {
+            billSubtotal.style.display = 'none';
+        }
+        if (billTax) {
+            billTax.style.display = 'none';
+        }
+    }
+
+    const total = subtotal + totalTax;
+    if (billTotal) {
+        billTotal.textContent = total.toFixed(2);
+    }
+
+    // Show print bill and print
+    if (printBillDiv) {
+        printBillDiv.classList.remove('hidden');
+        
+        // Wait a bit for the content to render, then print
+        setTimeout(() => {
+            window.print();
+            // Hide after print dialog closes (or user cancels)
+            setTimeout(() => {
+                printBillDiv.classList.add('hidden');
+            }, 100);
+        }, 100);
+    }
+}
+
+// Sales Report
+function showSalesReport() {
+    document.getElementById('salesReportSection').classList.remove('hidden');
+    // Set default date range (last 30 days)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    
+    document.getElementById('startDate').value = startDate.toISOString().split('T')[0];
+    document.getElementById('endDate').value = endDate.toISOString().split('T')[0];
+    document.getElementById('userReportStartDate').value = startDate.toISOString().split('T')[0];
+    document.getElementById('userReportEndDate').value = endDate.toISOString().split('T')[0];
+    document.getElementById('itemReportStartDate').value = startDate.toISOString().split('T')[0];
+    document.getElementById('itemReportEndDate').value = endDate.toISOString().split('T')[0];
+    
+    // Clear search and hide preview
+    document.getElementById('orderSearchInput').value = '';
+    document.getElementById('reportPreviewSection').classList.add('hidden');
+    document.getElementById('salesReportContent').innerHTML = '';
+    
+    // Load transaction history
+    loadTransactionHistory();
+    
+    // Load cancelled bills
+    loadCancelledBills();
+}
+
+function generateSalesReport() {
+    const monthSelect = document.getElementById('monthSelect').value;
+    if (!monthSelect) {
+        alert('Please select a month!');
+        return;
+    }
+
+    const [year, month] = monthSelect.split('-').map(Number);
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+
+    // Filter orders by selected month
+    const filteredOrders = orders.filter(order => {
+        const orderDate = new Date(order.date);
+        return orderDate.getFullYear() === year && orderDate.getMonth() + 1 === month;
+    });
+
+    // Calculate totals
+    let totalRevenue = 0;
+    const itemSales = {};
+
+    filteredOrders.forEach(order => {
+        totalRevenue += order.total;
+        order.items.forEach(item => {
+            if (!itemSales[item.name]) {
+                itemSales[item.name] = { quantity: 0, revenue: 0 };
+            }
+            itemSales[item.name].quantity += item.quantity;
+            itemSales[item.name].revenue += item.price * item.quantity;
+        });
+    });
+
+    // Render report
+    const reportContent = document.getElementById('salesReportContent');
+    reportContent.innerHTML = '';
+
+    if (filteredOrders.length === 0) {
+        reportContent.innerHTML = '<p style="text-align: center; color: #999;">No orders found for this month.</p>';
+        return;
+    }
+
+    const summaryDiv = document.createElement('div');
+    summaryDiv.className = 'report-summary';
+    summaryDiv.innerHTML = `
+        <h3>Summary for ${new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
+        <p>Total Orders: ${filteredOrders.length}</p>
+        <p>Total Revenue: â‚¹${totalRevenue.toFixed(2)}</p>
+    `;
+    reportContent.appendChild(summaryDiv);
+
+    const itemsDiv = document.createElement('div');
+    itemsDiv.className = 'report-items';
+    itemsDiv.innerHTML = '<h4>Item-wise Sales</h4>';
+    
+    const table = document.createElement('table');
+    table.innerHTML = `
+        <thead>
+            <tr>
+                <th>Item Name</th>
+                <th>Quantity Sold</th>
+                <th>Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${Object.entries(itemSales).map(([name, data]) => `
+                <tr>
+                    <td>${name}</td>
+                    <td>${data.quantity}</td>
+                    <td>â‚¹${data.revenue.toFixed(2)}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    `;
+    itemsDiv.appendChild(table);
+    reportContent.appendChild(itemsDiv);
+    
+    // Show preview and store report data
+    showReportPreview(filteredOrders, itemSales, totalRevenue, startDateFormatted, endDateFormatted);
+}
+
+// Store current report data for export
+let currentReportData = null;
+let currentUserWiseReportData = null;
+let currentItemWiseReportData = null;
+
+// Store current preview order
+let currentPreviewOrder = null;
+
+function showReportPreview(orders, itemSales, totalRevenue, startDate, endDate, totalSubtotal = 0, totalTax = 0) {
+    const previewSection = document.getElementById('reportPreviewSection');
+    const previewContent = document.getElementById('reportPreviewContent');
+    
+    // Calculate totals if not provided
+    if (totalSubtotal === 0 && totalTax === 0) {
+        totalSubtotal = orders.reduce((sum, order) => sum + (order.subtotal || order.total || 0), 0);
+        totalTax = orders.reduce((sum, order) => sum + (order.tax || 0), 0);
+    }
+    
+    // Store report data for export
+    currentReportData = {
+        orders: orders,
+        itemSales: itemSales,
+        totalRevenue: totalRevenue,
+        totalSubtotal: totalSubtotal,
+        totalTax: totalTax,
+        startDate: startDate,
+        endDate: endDate
+    };
+    
+    // Create preview content
+    previewContent.innerHTML = '';
+    
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'report-preview-content';
+    previewDiv.innerHTML = `
+        <div class="preview-summary">
+            <h4>Sales Report: ${startDate} to ${endDate}</h4>
+            <p><strong>Total Orders:</strong> ${orders.length}</p>
+            <p><strong>Subtotal:</strong> â‚¹${totalSubtotal.toFixed(2)}</p>
+            <p><strong>GST/Tax:</strong> â‚¹${totalTax.toFixed(2)}</p>
+            <p><strong>Total Revenue:</strong> â‚¹${totalRevenue.toFixed(2)}</p>
+        </div>
+        <div class="preview-table">
+            <h5 style="margin-top: 20px;">Item-wise Sales</h5>
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Item Name</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Quantity Sold</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${Object.entries(itemSales).map(([name, data]) => `
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #ddd;">${name}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${data.quantity}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${data.revenue.toFixed(2)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;" colspan="2">Subtotal</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalSubtotal.toFixed(2)}</td>
+                    </tr>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;" colspan="2">GST/Tax</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalTax.toFixed(2)}</td>
+                    </tr>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;" colspan="2">Total Revenue</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalRevenue.toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <div class="preview-transactions" style="margin-top: 30px;">
+            <h5>Transaction Details</h5>
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Order #</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Date & Time</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Items</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Subtotal</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">GST/Tax</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Total Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${orders.map(order => {
+                        const orderDate = new Date(order.date).toLocaleString();
+                        const itemsList = order.items.map(item => `${item.name} (${item.quantity}x)`).join(', ');
+                        const orderSubtotal = order.subtotal || order.total || 0;
+                        const orderTax = order.tax || 0;
+                        return `
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">${order.id}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">${orderDate}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">${itemsList}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${orderSubtotal.toFixed(2)}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${orderTax.toFixed(2)}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;"><strong>â‚¹${order.total.toFixed(2)}</strong></td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;" colspan="3">Grand Total</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalSubtotal.toFixed(2)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalTax.toFixed(2)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalRevenue.toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    `;
+    
+    previewContent.appendChild(previewDiv);
+    previewSection.classList.remove('hidden');
+}
+
+function generateDateRangeReport() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates!');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        alert('Start date must be before end date!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    
+    // Filter orders by date range
+    const filteredOrders = orders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            
+            // Parse start and end dates (YYYY-MM-DD format from input)
+            const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+            
+            // Create date objects in local timezone
+            const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+            const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+            
+            // Compare dates
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            console.error('Error filtering order:', error, order);
+            return false;
+        }
+    });
+    
+    // Calculate totals with GST
+    let totalRevenue = 0;
+    let totalSubtotal = 0;
+    let totalTax = 0;
+    const itemSales = {};
+    
+    filteredOrders.forEach(order => {
+        totalRevenue += order.total || 0;
+        totalSubtotal += order.subtotal || order.total || 0;
+        totalTax += order.tax || 0;
+        order.items.forEach(item => {
+            if (!itemSales[item.name]) {
+                itemSales[item.name] = { quantity: 0, revenue: 0 };
+            }
+            itemSales[item.name].quantity += item.quantity;
+            itemSales[item.name].revenue += item.price * item.quantity;
+        });
+    });
+    
+    // Render report
+    const reportContent = document.getElementById('salesReportContent');
+    reportContent.innerHTML = '';
+    
+    if (filteredOrders.length === 0) {
+        reportContent.innerHTML = '<p style="text-align: center; color: #999;">No orders found for the selected date range.</p>';
+        // Hide preview if no orders
+        document.getElementById('reportPreviewSection').classList.add('hidden');
+        currentReportData = null;
+        return;
+    }
+    
+    const summaryDiv = document.createElement('div');
+    summaryDiv.className = 'report-summary';
+    const startDateFormatted = new Date(startDate).toLocaleDateString();
+    const endDateFormatted = new Date(endDate).toLocaleDateString();
+    summaryDiv.innerHTML = `
+        <h3>Summary for ${startDateFormatted} to ${endDateFormatted}</h3>
+        <p>Total Orders: ${filteredOrders.length}</p>
+        <p>Subtotal: â‚¹${totalSubtotal.toFixed(2)}</p>
+        <p>GST/Tax: â‚¹${totalTax.toFixed(2)}</p>
+        <p><strong>Total Revenue: â‚¹${totalRevenue.toFixed(2)}</strong></p>
+    `;
+    reportContent.appendChild(summaryDiv);
+    
+    const itemsDiv = document.createElement('div');
+    itemsDiv.className = 'report-items';
+    itemsDiv.innerHTML = '<h4>Item-wise Sales</h4>';
+    
+    const table = document.createElement('table');
+    table.innerHTML = `
+        <thead>
+            <tr>
+                <th>Item Name</th>
+                <th>Quantity Sold</th>
+                <th>Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${Object.entries(itemSales).map(([name, data]) => `
+                <tr>
+                    <td>${name}</td>
+                    <td>${data.quantity}</td>
+                    <td>â‚¹${data.revenue.toFixed(2)}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    `;
+    itemsDiv.appendChild(table);
+    reportContent.appendChild(itemsDiv);
+    
+    // Add transaction details section
+    const transactionsDiv = document.createElement('div');
+    transactionsDiv.className = 'report-transactions';
+    transactionsDiv.style.marginTop = '30px';
+    transactionsDiv.innerHTML = '<h4>Transaction Details</h4>';
+    
+    const transactionsTable = document.createElement('table');
+    transactionsTable.style.width = '100%';
+    transactionsTable.style.marginTop = '10px';
+    transactionsTable.innerHTML = `
+        <thead>
+            <tr>
+                <th>Order #</th>
+                <th>Date & Time</th>
+                <th>Items</th>
+                <th>Subtotal</th>
+                <th>GST/Tax</th>
+                <th>Total Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${filteredOrders.map(order => {
+                const orderDate = new Date(order.date).toLocaleString();
+                const itemsList = order.items.map(item => `${item.name} (${item.quantity}x)`).join(', ');
+                const orderSubtotal = order.subtotal || order.total || 0;
+                const orderTax = order.tax || 0;
+                return `
+                    <tr>
+                        <td>${order.id}</td>
+                        <td>${orderDate}</td>
+                        <td>${itemsList}</td>
+                        <td>â‚¹${orderSubtotal.toFixed(2)}</td>
+                        <td>â‚¹${orderTax.toFixed(2)}</td>
+                        <td><strong>â‚¹${order.total.toFixed(2)}</strong></td>
+                    </tr>
+                `;
+            }).join('')}
+        </tbody>
+        <tfoot>
+            <tr style="background-color: #f0f0f0; font-weight: bold;">
+                <td colspan="3">Grand Total</td>
+                <td>â‚¹${totalSubtotal.toFixed(2)}</td>
+                <td>â‚¹${totalTax.toFixed(2)}</td>
+                <td>â‚¹${totalRevenue.toFixed(2)}</td>
+            </tr>
+        </tfoot>
+    `;
+    transactionsDiv.appendChild(transactionsTable);
+    reportContent.appendChild(transactionsDiv);
+    
+    // Show preview and store report data
+    showReportPreview(filteredOrders, itemSales, totalRevenue, startDateFormatted, endDateFormatted);
+}
+
+function exportToPDF() {
+    if (!currentReportData) {
+        alert('No report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    const restaurantAddress = restaurantInfo.address || '';
+    
+    // Create PDF content
+    const pdfContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Sales Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                .header { text-align: center; margin-bottom: 30px; }
+                .header h1 { margin: 0; }
+                .summary { margin-bottom: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #000; padding: 10px; text-align: left; }
+                th { background-color: #f0f0f0; }
+                .total-row { font-weight: bold; background-color: #f0f0f0; }
+                .text-right { text-align: right; }
+                .text-center { text-align: center; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>${restaurantName}</h1>
+                ${restaurantAddress ? `<p>${restaurantAddress}</p>` : ''}
+                <h2>Sales Report</h2>
+                <p>${currentReportData.startDate} to ${currentReportData.endDate}</p>
+            </div>
+            <div class="summary">
+                <p><strong>Total Orders:</strong> ${currentReportData.orders.length}</p>
+                <p><strong>Total Revenue:</strong> â‚¹${currentReportData.totalRevenue.toFixed(2)}</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item Name</th>
+                        <th class="text-center">Quantity Sold</th>
+                        <th class="text-right">Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${Object.entries(currentReportData.itemSales).map(([name, data]) => `
+                        <tr>
+                            <td>${name}</td>
+                            <td class="text-center">${data.quantity}</td>
+                            <td class="text-right">â‚¹${data.revenue.toFixed(2)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot>
+                    <tr class="total-row">
+                        <td colspan="2"><strong>Subtotal</strong></td>
+                        <td class="text-right"><strong>â‚¹${(currentReportData.totalSubtotal || currentReportData.totalRevenue || 0).toFixed(2)}</strong></td>
+                    </tr>
+                    <tr class="total-row">
+                        <td colspan="2"><strong>GST/Tax</strong></td>
+                        <td class="text-right"><strong>â‚¹${(currentReportData.totalTax || 0).toFixed(2)}</strong></td>
+                    </tr>
+                    <tr class="total-row">
+                        <td colspan="2"><strong>Total Revenue</strong></td>
+                        <td class="text-right"><strong>â‚¹${currentReportData.totalRevenue.toFixed(2)}</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+            <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
+                <p>Generated on: ${new Date().toLocaleString()}</p>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    // Open in new window and print
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(pdfContent);
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    setTimeout(() => {
+        printWindow.print();
+    }, 250);
+}
+
+function exportToExcel() {
+    if (!currentReportData) {
+        alert('No report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    
+    // Get cancelled orders for the same date range
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    const [startYear, startMonth, startDay] = currentReportData.startDate.split('/').map(Number);
+    const [endYear, endMonth, endDay] = currentReportData.endDate.split('/').map(Number);
+    const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+    const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+    
+    const filteredCancelledOrders = cancelledOrders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            return false;
+        }
+    });
+    
+    // Create CSV content for Sales Report (Sheet 1)
+    let csvContent = '\uFEFF'; // BOM for UTF-8
+    
+    // Header
+    csvContent += `${restaurantName}\n`;
+    csvContent += `Sales Report\n`;
+    csvContent += `${currentReportData.startDate} to ${currentReportData.endDate}\n`;
+    csvContent += `\n`;
+    csvContent += `Total Orders,${currentReportData.orders.length}\n`;
+    csvContent += `Subtotal,â‚¹${(currentReportData.totalSubtotal || currentReportData.totalRevenue || 0).toFixed(2)}\n`;
+    csvContent += `GST/Tax,â‚¹${(currentReportData.totalTax || 0).toFixed(2)}\n`;
+    csvContent += `Total Revenue,â‚¹${currentReportData.totalRevenue.toFixed(2)}\n`;
+    csvContent += `\n`;
+    
+    // Item-wise Sales Section
+    csvContent += `ITEM-WISE SALES\n`;
+    csvContent += `Item Name,Quantity Sold,Revenue\n`;
+    
+    // Table data
+    Object.entries(currentReportData.itemSales).forEach(([name, data]) => {
+        csvContent += `"${name}",${data.quantity},â‚¹${data.revenue.toFixed(2)}\n`;
+    });
+    
+    // Total rows
+    csvContent += `Subtotal,,â‚¹${(currentReportData.totalSubtotal || currentReportData.totalRevenue || 0).toFixed(2)}\n`;
+    csvContent += `GST/Tax,,â‚¹${(currentReportData.totalTax || 0).toFixed(2)}\n`;
+    csvContent += `Total Revenue,,â‚¹${currentReportData.totalRevenue.toFixed(2)}\n`;
+    csvContent += `\n`;
+    
+    // Transaction Details Section
+    csvContent += `TRANSACTION DETAILS\n`;
+    csvContent += `Order #,Date & Time,Payment Method,Items,Subtotal,GST/Tax,Total Amount\n`;
+    
+    // Transaction data
+    currentReportData.orders.forEach(order => {
+        const orderDate = new Date(order.date).toLocaleString();
+        const itemsList = order.items.map(item => `${item.name} (${item.quantity}x)`).join('; ');
+        const paymentMethod = order.paymentMethod || 'N/A';
+        const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+        const orderSubtotal = order.subtotal || order.total || 0;
+        const orderTax = order.tax || 0;
+        csvContent += `${order.id},"${orderDate}","${paymentMethodLabel}","${itemsList}",â‚¹${orderSubtotal.toFixed(2)},â‚¹${orderTax.toFixed(2)},â‚¹${order.total.toFixed(2)}\n`;
+    });
+    
+    // Create blob and download Sales Report
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    const fileName = `Sales_Report_${currentReportData.startDate.replace(/\//g, '-')}_to_${currentReportData.endDate.replace(/\//g, '-')}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Create separate CSV for Cancelled Bills (Sheet 2)
+    if (filteredCancelledOrders.length > 0) {
+        let cancelledCsvContent = '\uFEFF'; // BOM for UTF-8
+        
+        cancelledCsvContent += `${restaurantName}\n`;
+        cancelledCsvContent += `Cancelled Bills Report\n`;
+        cancelledCsvContent += `${currentReportData.startDate} to ${currentReportData.endDate}\n`;
+        cancelledCsvContent += `\n`;
+        cancelledCsvContent += `Total Cancelled Orders,${filteredCancelledOrders.length}\n`;
+        
+        let cancelledTotal = 0;
+        filteredCancelledOrders.forEach(order => {
+            cancelledTotal += order.total;
+        });
+        cancelledCsvContent += `Total Cancelled Amount,â‚¹${cancelledTotal.toFixed(2)}\n`;
+        cancelledCsvContent += `\n`;
+        
+        // Cancelled Bills Details
+        cancelledCsvContent += `CANCELLED BILLS DETAILS\n`;
+        cancelledCsvContent += `Order #,Original Date,Payment Method,Cancelled Date,Cancelled By,Items,Total Amount\n`;
+        
+        filteredCancelledOrders.forEach(order => {
+            const orderDate = new Date(order.date).toLocaleString();
+            const cancelledDate = order.cancelledDate ? new Date(order.cancelledDate).toLocaleString() : 'N/A';
+            const cancelledBy = order.cancelledBy || 'Admin';
+            const itemsList = order.items.map(item => `${item.name} (${item.quantity}x)`).join('; ');
+            const paymentMethod = order.paymentMethod || 'N/A';
+            const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+            cancelledCsvContent += `${order.id},"${orderDate}","${paymentMethodLabel}","${cancelledDate}","${cancelledBy}","${itemsList}",â‚¹${order.total.toFixed(2)}\n`;
+        });
+        
+        // Download cancelled bills CSV
+        const cancelledBlob = new Blob([cancelledCsvContent], { type: 'text/csv;charset=utf-8;' });
+        const cancelledLink = document.createElement('a');
+        const cancelledUrl = URL.createObjectURL(cancelledBlob);
+        
+        const cancelledFileName = `Cancelled_Bills_${currentReportData.startDate.replace(/\//g, '-')}_to_${currentReportData.endDate.replace(/\//g, '-')}.csv`;
+        cancelledLink.setAttribute('href', cancelledUrl);
+        cancelledLink.setAttribute('download', cancelledFileName);
+        cancelledLink.style.visibility = 'hidden';
+        document.body.appendChild(cancelledLink);
+        cancelledLink.click();
+        document.body.removeChild(cancelledLink);
+    }
+}
+
+function generateUserWiseReport() {
+    const startDate = document.getElementById('userReportStartDate').value;
+    const endDate = document.getElementById('userReportEndDate').value;
+    
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates!');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        alert('Start date must be before end date!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    
+    // Filter orders by date range
+    const filteredOrders = orders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+            
+            const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+            const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+            
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            console.error('Error filtering order:', error, order);
+            return false;
+        }
+    });
+    
+    if (filteredOrders.length === 0) {
+        document.getElementById('salesReportContent').innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No orders found for the selected date range.</p>';
+        return;
+    }
+    
+    // Group orders by user
+    const userWiseData = {};
+    
+    filteredOrders.forEach(order => {
+        const username = order.username || 'Guest';
+        const userId = order.userId || 'guest';
+        
+        if (!userWiseData[username]) {
+            userWiseData[username] = {
+                userId: userId,
+                username: username,
+                orders: [],
+                totalOrders: 0,
+                totalRevenue: 0,
+                totalTax: 0,
+                totalSubtotal: 0
+            };
+        }
+        
+        userWiseData[username].orders.push(order);
+        userWiseData[username].totalOrders += 1;
+        userWiseData[username].totalRevenue += order.total || 0;
+        userWiseData[username].totalTax += order.tax || 0;
+        userWiseData[username].totalSubtotal += order.subtotal || order.total || 0;
+    });
+    
+    // Render user-wise report
+    const reportContent = document.getElementById('salesReportContent');
+    reportContent.innerHTML = '';
+    
+    const reportDiv = document.createElement('div');
+    reportDiv.className = 'user-wise-report';
+    
+    const startDateFormatted = new Date(startDate).toLocaleDateString();
+    const endDateFormatted = new Date(endDate).toLocaleDateString();
+    
+    let reportHtml = `
+        <div class="report-summary">
+            <h3>User-Wise Sales Report</h3>
+            <p><strong>Date Range:</strong> ${startDateFormatted} to ${endDateFormatted}</p>
+            <p><strong>Total Users:</strong> ${Object.keys(userWiseData).length}</p>
+        </div>
+    `;
+    
+    // Create table for user-wise summary
+    let summaryTable = `
+        <div style="margin-top: 20px;">
+            <h4>User Summary</h4>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">User</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Total Orders</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Subtotal</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Tax</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Total Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    // Sort users by total revenue (descending)
+    const sortedUsers = Object.values(userWiseData).sort((a, b) => b.totalRevenue - a.totalRevenue);
+    
+    sortedUsers.forEach(userData => {
+        summaryTable += `
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${userData.username}</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${userData.totalOrders}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${userData.totalSubtotal.toFixed(2)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${userData.totalTax.toFixed(2)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">â‚¹${userData.totalRevenue.toFixed(2)}</td>
+            </tr>
+        `;
+    });
+    
+    // Add total row
+    const grandTotalOrders = sortedUsers.reduce((sum, u) => sum + u.totalOrders, 0);
+    const grandTotalSubtotal = sortedUsers.reduce((sum, u) => sum + u.totalSubtotal, 0);
+    const grandTotalTax = sortedUsers.reduce((sum, u) => sum + u.totalTax, 0);
+    const grandTotalRevenue = sortedUsers.reduce((sum, u) => sum + u.totalRevenue, 0);
+    
+    summaryTable += `
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;">Grand Total</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${grandTotalOrders}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${grandTotalSubtotal.toFixed(2)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${grandTotalTax.toFixed(2)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${grandTotalRevenue.toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    `;
+    
+    // Add detailed breakdown by user
+    reportHtml += summaryTable;
+    
+    reportHtml += `
+        <div style="margin-top: 30px;">
+            <h4>Detailed Breakdown by User</h4>
+    `;
+    
+    sortedUsers.forEach(userData => {
+        reportHtml += `
+            <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;">
+                <h5 style="margin-top: 0; color: #333;">${userData.username} - ${userData.totalOrders} Order(s)</h5>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <thead>
+                        <tr style="background-color: #e8e8e8;">
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Order #</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">User</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Payment</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Subtotal</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Tax</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        // Sort orders by date (newest first)
+        const sortedUserOrders = userData.orders.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        sortedUserOrders.forEach(order => {
+            const orderDate = new Date(order.date).toLocaleString();
+            const paymentMethod = order.paymentMethod || 'N/A';
+            const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+            const orderSubtotal = order.subtotal || order.total || 0;
+            const orderTax = order.tax || 0;
+            const orderUser = order.username || 'Guest';
+            
+            reportHtml += `
+                <tr>
+                    <td style="padding: 6px; border: 1px solid #ddd;">${order.id}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd;">${orderDate}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd;"><strong>${orderUser}</strong></td>
+                    <td style="padding: 6px; border: 1px solid #ddd;">${paymentMethodLabel}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">â‚¹${orderSubtotal.toFixed(2)}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">â‚¹${orderTax.toFixed(2)}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd; text-align: right; font-weight: bold;">â‚¹${order.total.toFixed(2)}</td>
+                </tr>
+            `;
+        });
+        
+        reportHtml += `
+                    </tbody>
+                    <tfoot>
+                        <tr style="background-color: #e8e8e8; font-weight: bold;">
+                            <td style="padding: 8px; border: 1px solid #ddd;" colspan="4">Subtotal for ${userData.username}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${userData.totalSubtotal.toFixed(2)}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${userData.totalTax.toFixed(2)}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${userData.totalRevenue.toFixed(2)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        `;
+    });
+    
+    reportHtml += `</div>`;
+    
+    // Add export buttons
+    reportHtml += `
+        <div style="margin-top: 30px; padding: 20px; background: #f0f0f0; border-radius: 5px; text-align: center;">
+            <h4 style="margin-bottom: 15px;">Export Report</h4>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button id="exportUserWisePDFBtn" class="btn btn-primary">Export as PDF</button>
+                <button id="exportUserWiseCSVBtn" class="btn btn-primary">Export as CSV</button>
+            </div>
+        </div>
+    `;
+    
+    reportDiv.innerHTML = reportHtml;
+    reportContent.appendChild(reportDiv);
+    
+    // Store user-wise report data for export
+    currentUserWiseReportData = {
+        userWiseData: userWiseData,
+        sortedUsers: sortedUsers,
+        filteredOrders: filteredOrders,
+        startDate: startDate,
+        endDate: endDate,
+        startDateFormatted: startDateFormatted,
+        endDateFormatted: endDateFormatted,
+        grandTotalOrders: sortedUsers.reduce((sum, u) => sum + u.totalOrders, 0),
+        grandTotalSubtotal: sortedUsers.reduce((sum, u) => sum + u.totalSubtotal, 0),
+        grandTotalTax: sortedUsers.reduce((sum, u) => sum + u.totalTax, 0),
+        grandTotalRevenue: sortedUsers.reduce((sum, u) => sum + u.totalRevenue, 0)
+    };
+    
+    // Add event listeners for export buttons
+    document.getElementById('exportUserWisePDFBtn').addEventListener('click', exportUserWiseReportToPDF);
+    document.getElementById('exportUserWiseCSVBtn').addEventListener('click', exportUserWiseReportToCSV);
+    
+    // Hide preview section
+    document.getElementById('reportPreviewSection').classList.add('hidden');
+}
+
+function exportUserWiseReportToPDF() {
+    if (!currentUserWiseReportData) {
+        alert('No user-wise report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    const restaurantAddress = restaurantInfo.address || '';
+    
+    const { sortedUsers, startDateFormatted, endDateFormatted, grandTotalOrders, grandTotalSubtotal, grandTotalTax, grandTotalRevenue } = currentUserWiseReportData;
+    
+    // Create PDF content
+    let pdfContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>User-Wise Sales Report</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    padding: 20px;
+                    font-size: 12px;
+                }
+                .header {
+                    text-align: center;
+                    margin-bottom: 20px;
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 10px;
+                }
+                .header h1 {
+                    margin: 0;
+                    font-size: 18px;
+                }
+                .header p {
+                    margin: 5px 0;
+                    color: #666;
+                }
+                .summary {
+                    margin: 20px 0;
+                    padding: 10px;
+                    background: #f0f0f0;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 15px 0;
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }
+                th {
+                    background-color: #f0f0f0;
+                    font-weight: bold;
+                }
+                .text-center {
+                    text-align: center;
+                }
+                .text-right {
+                    text-align: right;
+                }
+                .user-section {
+                    margin: 20px 0;
+                    page-break-inside: avoid;
+                }
+                .user-header {
+                    background: #e8e8e8;
+                    padding: 10px;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>${restaurantName}</h1>
+                ${restaurantAddress ? `<p>${restaurantAddress}</p>` : ''}
+                <h2>User-Wise Sales Report</h2>
+                <p>${startDateFormatted} to ${endDateFormatted}</p>
+            </div>
+            <div class="summary">
+                <p><strong>Total Users:</strong> ${sortedUsers.length}</p>
+                <p><strong>Total Orders:</strong> ${grandTotalOrders}</p>
+                <p><strong>Total Revenue:</strong> â‚¹${grandTotalRevenue.toFixed(2)}</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th class="text-center">Total Orders</th>
+                        <th class="text-right">Subtotal</th>
+                        <th class="text-right">Tax</th>
+                        <th class="text-right">Total Revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedUsers.map(userData => `
+                        <tr>
+                            <td><strong>${userData.username}</strong></td>
+                            <td class="text-center">${userData.totalOrders}</td>
+                            <td class="text-right">â‚¹${userData.totalSubtotal.toFixed(2)}</td>
+                            <td class="text-right">â‚¹${userData.totalTax.toFixed(2)}</td>
+                            <td class="text-right"><strong>â‚¹${userData.totalRevenue.toFixed(2)}</strong></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td><strong>Grand Total</strong></td>
+                        <td class="text-center"><strong>${grandTotalOrders}</strong></td>
+                        <td class="text-right"><strong>â‚¹${grandTotalSubtotal.toFixed(2)}</strong></td>
+                        <td class="text-right"><strong>â‚¹${grandTotalTax.toFixed(2)}</strong></td>
+                        <td class="text-right"><strong>â‚¹${grandTotalRevenue.toFixed(2)}</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+            ${sortedUsers.map(userData => {
+                const sortedUserOrders = userData.orders.sort((a, b) => new Date(b.date) - new Date(a.date));
+                return `
+                    <div class="user-section">
+                        <div class="user-header">${userData.username} - ${userData.totalOrders} Order(s)</div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Order #</th>
+                                    <th>Date</th>
+                                    <th>User</th>
+                                    <th>Payment</th>
+                                    <th class="text-right">Subtotal</th>
+                                    <th class="text-right">Tax</th>
+                                    <th class="text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sortedUserOrders.map(order => {
+                                    const orderDate = new Date(order.date).toLocaleString();
+                                    const paymentMethod = order.paymentMethod || 'N/A';
+                                    const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+                                    const orderSubtotal = order.subtotal || order.total || 0;
+                                    const orderTax = order.tax || 0;
+                                    const orderUser = order.username || 'Guest';
+                                    return `
+                                        <tr>
+                                            <td>${order.id}</td>
+                                            <td>${orderDate}</td>
+                                            <td><strong>${orderUser}</strong></td>
+                                            <td>${paymentMethodLabel}</td>
+                                            <td class="text-right">â‚¹${orderSubtotal.toFixed(2)}</td>
+                                            <td class="text-right">â‚¹${orderTax.toFixed(2)}</td>
+                                            <td class="text-right"><strong>â‚¹${order.total.toFixed(2)}</strong></td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colspan="4"><strong>Subtotal for ${userData.username}</strong></td>
+                                    <td class="text-right"><strong>â‚¹${userData.totalSubtotal.toFixed(2)}</strong></td>
+                                    <td class="text-right"><strong>â‚¹${userData.totalTax.toFixed(2)}</strong></td>
+                                    <td class="text-right"><strong>â‚¹${userData.totalRevenue.toFixed(2)}</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                `;
+            }).join('')}
+            <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
+                <p>Generated on: ${new Date().toLocaleString()}</p>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    // Open in new window and print
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(pdfContent);
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    setTimeout(() => {
+        printWindow.print();
+    }, 250);
+}
+
+function exportUserWiseReportToCSV() {
+    if (!currentUserWiseReportData) {
+        alert('No user-wise report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    
+    const { sortedUsers, startDateFormatted, endDateFormatted, grandTotalOrders, grandTotalSubtotal, grandTotalTax, grandTotalRevenue } = currentUserWiseReportData;
+    
+    // Create CSV content
+    let csvContent = '\uFEFF'; // BOM for UTF-8
+    
+    // Header
+    csvContent += `${restaurantName}\n`;
+    csvContent += `User-Wise Sales Report\n`;
+    csvContent += `${startDateFormatted} to ${endDateFormatted}\n`;
+    csvContent += `\n`;
+    csvContent += `Total Users,${sortedUsers.length}\n`;
+    csvContent += `Total Orders,${grandTotalOrders}\n`;
+    csvContent += `Total Revenue,â‚¹${grandTotalRevenue.toFixed(2)}\n`;
+    csvContent += `\n`;
+    
+    // User Summary Section
+    csvContent += `USER SUMMARY\n`;
+    csvContent += `User,Total Orders,Subtotal,Tax,Total Revenue\n`;
+    
+    sortedUsers.forEach(userData => {
+        csvContent += `"${userData.username}",${userData.totalOrders},â‚¹${userData.totalSubtotal.toFixed(2)},â‚¹${userData.totalTax.toFixed(2)},â‚¹${userData.totalRevenue.toFixed(2)}\n`;
+    });
+    
+    // Grand Total
+    csvContent += `Grand Total,${grandTotalOrders},â‚¹${grandTotalSubtotal.toFixed(2)},â‚¹${grandTotalTax.toFixed(2)},â‚¹${grandTotalRevenue.toFixed(2)}\n`;
+    csvContent += `\n`;
+    
+    // Detailed Breakdown by User
+    csvContent += `DETAILED BREAKDOWN BY USER\n`;
+    csvContent += `\n`;
+    
+    sortedUsers.forEach(userData => {
+        csvContent += `${userData.username} - ${userData.totalOrders} Order(s)\n`;
+        csvContent += `Order #,Date & Time,User,Payment Method,Subtotal,Tax,Total Amount\n`;
+        
+        // Sort orders by date (newest first)
+        const sortedUserOrders = userData.orders.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        sortedUserOrders.forEach(order => {
+            const orderDate = new Date(order.date).toLocaleString();
+            const paymentMethod = order.paymentMethod || 'N/A';
+            const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+            const orderSubtotal = order.subtotal || order.total || 0;
+            const orderTax = order.tax || 0;
+            const orderUser = order.username || 'Guest';
+            csvContent += `${order.id},"${orderDate}","${orderUser}","${paymentMethodLabel}",â‚¹${orderSubtotal.toFixed(2)},â‚¹${orderTax.toFixed(2)},â‚¹${order.total.toFixed(2)}\n`;
+        });
+        
+        // User subtotal
+        csvContent += `Subtotal for ${userData.username},,,,â‚¹${userData.totalSubtotal.toFixed(2)},â‚¹${userData.totalTax.toFixed(2)},â‚¹${userData.totalRevenue.toFixed(2)}\n`;
+        csvContent += `\n`;
+    });
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    const fileName = `User_Wise_Report_${startDateFormatted.replace(/\//g, '-')}_to_${endDateFormatted.replace(/\//g, '-')}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function generateItemWiseReport() {
+    const startDate = document.getElementById('itemReportStartDate').value;
+    const endDate = document.getElementById('itemReportEndDate').value;
+    
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates!');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        alert('Start date must be before end date!');
+        return;
+    }
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    
+    // Filter orders by date range
+    const filteredOrders = orders.filter(order => {
+        try {
+            const orderDate = new Date(order.date);
+            const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+            
+            const start = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+            const end = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
+            
+            return orderDate >= start && orderDate <= end;
+        } catch (error) {
+            console.error('Error filtering order:', error, order);
+            return false;
+        }
+    });
+    
+    if (filteredOrders.length === 0) {
+        document.getElementById('salesReportContent').innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No orders found for the selected date range.</p>';
+        return;
+    }
+    
+    // Calculate item-wise sales with daily breakdown
+    const itemSales = {};
+    const itemDailySales = {}; // Track daily sales for each item
+    let totalRevenue = 0;
+    let totalQuantity = 0;
+    
+    filteredOrders.forEach(order => {
+        totalRevenue += order.total || 0;
+        const orderDate = new Date(order.date);
+        const dateKey = orderDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+        
+        order.items.forEach(item => {
+            if (!itemSales[item.name]) {
+                itemSales[item.name] = {
+                    quantity: 0,
+                    revenue: 0,
+                    orders: 0,
+                    averagePrice: 0
+                };
+                itemDailySales[item.name] = {};
+            }
+            
+            // Update totals
+            itemSales[item.name].quantity += item.quantity;
+            itemSales[item.name].revenue += item.price * item.quantity;
+            itemSales[item.name].orders += 1;
+            totalQuantity += item.quantity;
+            
+            // Track daily sales
+            if (!itemDailySales[item.name][dateKey]) {
+                itemDailySales[item.name][dateKey] = {
+                    quantity: 0,
+                    revenue: 0
+                };
+            }
+            itemDailySales[item.name][dateKey].quantity += item.quantity;
+            itemDailySales[item.name][dateKey].revenue += item.price * item.quantity;
+        });
+    });
+    
+    // Calculate average price for each item
+    Object.keys(itemSales).forEach(itemName => {
+        if (itemSales[itemName].quantity > 0) {
+            itemSales[itemName].averagePrice = itemSales[itemName].revenue / itemSales[itemName].quantity;
+        }
+    });
+    
+    // Render item-wise report
+    const reportContent = document.getElementById('salesReportContent');
+    reportContent.innerHTML = '';
+    
+    const reportDiv = document.createElement('div');
+    reportDiv.className = 'item-wise-report';
+    
+    const startDateFormatted = new Date(startDate).toLocaleDateString();
+    const endDateFormatted = new Date(endDate).toLocaleDateString();
+    
+    let reportHtml = `
+        <div class="report-summary">
+            <h3>Item-Wise Sales Report</h3>
+            <p><strong>Date Range:</strong> ${startDateFormatted} to ${endDateFormatted}</p>
+            <p><strong>Total Orders:</strong> ${filteredOrders.length}</p>
+            <p><strong>Total Items Sold:</strong> ${totalQuantity}</p>
+            <p><strong>Total Revenue:</strong> â‚¹${totalRevenue.toFixed(2)}</p>
+        </div>
+    `;
+    
+    // Create table for item-wise summary
+    let summaryTable = `
+        <div style="margin-top: 20px;">
+            <h4>Item Summary</h4>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background-color: #f0f0f0;">
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Item Name</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Quantity Sold</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Average Price</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Total Revenue</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Orders</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    // Sort items by revenue (descending)
+    const sortedItems = Object.entries(itemSales).sort((a, b) => b[1].revenue - a[1].revenue);
+    
+    sortedItems.forEach(([itemName, data]) => {
+        summaryTable += `
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>${itemName}</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${data.quantity}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${data.averagePrice.toFixed(2)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">â‚¹${data.revenue.toFixed(2)}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${data.orders}</td>
+            </tr>
+        `;
+    });
+    
+    // Add total row
+    summaryTable += `
+                </tbody>
+                <tfoot>
+                    <tr style="background-color: #f0f0f0; font-weight: bold;">
+                        <td style="padding: 10px; border: 1px solid #ddd;">Grand Total</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${totalQuantity}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">-</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">â‚¹${totalRevenue.toFixed(2)}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">${filteredOrders.length}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    `;
+    
+    reportHtml += summaryTable;
+    
+    // Add daily breakdown section
+    reportHtml += `
+        <div style="margin-top: 30px;">
+            <h4>Daily Breakdown by Item</h4>
+    `;
+    
+    sortedItems.forEach(([itemName, data]) => {
+        const dailyData = itemDailySales[itemName];
+        const sortedDates = Object.keys(dailyData).sort();
+        
+        if (sortedDates.length === 0) return;
+        
+        reportHtml += `
+            <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;">
+                <h5 style="margin-top: 0; color: #333;">${itemName} - Daily Sales</h5>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <thead>
+                        <tr style="background-color: #e8e8e8;">
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Quantity</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Revenue</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        sortedDates.forEach(dateKey => {
+            const dateObj = new Date(dateKey);
+            const dateFormatted = dateObj.toLocaleDateString();
+            const dayData = dailyData[dateKey];
+            
+            reportHtml += `
+                <tr>
+                    <td style="padding: 6px; border: 1px solid #ddd;">${dateFormatted}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">${dayData.quantity}</td>
+                    <td style="padding: 6px; border: 1px solid #ddd; text-align: right; font-weight: bold;">â‚¹${dayData.revenue.toFixed(2)}</td>
+                </tr>
+            `;
+        });
+        
+        reportHtml += `
+                    </tbody>
+                    <tfoot>
+                        <tr style="background-color: #e8e8e8; font-weight: bold;">
+                            <td style="padding: 8px; border: 1px solid #ddd;">Total for ${itemName}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${data.quantity}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">â‚¹${data.revenue.toFixed(2)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        `;
+    });
+    
+    reportHtml += `</div>`;
+    
+    // Add export buttons
+    reportHtml += `
+        <div style="margin-top: 30px; padding: 20px; background: #f0f0f0; border-radius: 5px; text-align: center;">
+            <h4 style="margin-bottom: 15px;">Export Report</h4>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button id="exportItemWisePDFBtn" class="btn btn-primary">Export as PDF</button>
+                <button id="exportItemWiseCSVBtn" class="btn btn-primary">Export as CSV</button>
+            </div>
+        </div>
+    `;
+    
+    reportDiv.innerHTML = reportHtml;
+    reportContent.appendChild(reportDiv);
+    
+    // Store item-wise report data for export
+    currentItemWiseReportData = {
+        itemSales: itemSales,
+        itemDailySales: itemDailySales,
+        sortedItems: sortedItems,
+        filteredOrders: filteredOrders,
+        startDate: startDate,
+        endDate: endDate,
+        startDateFormatted: startDateFormatted,
+        endDateFormatted: endDateFormatted,
+        totalRevenue: totalRevenue,
+        totalQuantity: totalQuantity,
+        totalOrders: filteredOrders.length
+    };
+    
+    // Add event listeners for export buttons
+    document.getElementById('exportItemWisePDFBtn').addEventListener('click', exportItemWiseReportToPDF);
+    document.getElementById('exportItemWiseCSVBtn').addEventListener('click', exportItemWiseReportToCSV);
+    
+    // Hide preview section
+    document.getElementById('reportPreviewSection').classList.add('hidden');
+}
+
+function exportItemWiseReportToPDF() {
+    if (!currentItemWiseReportData) {
+        alert('No item-wise report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    const restaurantAddress = restaurantInfo.address || '';
+    
+    const { sortedItems, itemDailySales, startDateFormatted, endDateFormatted, totalRevenue, totalQuantity, totalOrders } = currentItemWiseReportData;
+    
+    // Create PDF content
+    let pdfContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Item-Wise Sales Report</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    padding: 20px;
+                    font-size: 12px;
+                }
+                .header {
+                    text-align: center;
+                    margin-bottom: 20px;
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 10px;
+                }
+                .header h1 {
+                    margin: 0;
+                    font-size: 18px;
+                }
+                .header p {
+                    margin: 5px 0;
+                    color: #666;
+                }
+                .summary {
+                    margin: 20px 0;
+                    padding: 10px;
+                    background: #f0f0f0;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 15px 0;
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }
+                th {
+                    background-color: #f0f0f0;
+                    font-weight: bold;
+                }
+                .text-center {
+                    text-align: center;
+                }
+                .text-right {
+                    text-align: right;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>${restaurantName}</h1>
+                ${restaurantAddress ? `<p>${restaurantAddress}</p>` : ''}
+                <h2>Item-Wise Sales Report</h2>
+                <p>${startDateFormatted} to ${endDateFormatted}</p>
+            </div>
+            <div class="summary">
+                <p><strong>Total Orders:</strong> ${totalOrders}</p>
+                <p><strong>Total Items Sold:</strong> ${totalQuantity}</p>
+                <p><strong>Total Revenue:</strong> â‚¹${totalRevenue.toFixed(2)}</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item Name</th>
+                        <th class="text-center">Quantity Sold</th>
+                        <th class="text-right">Average Price</th>
+                        <th class="text-right">Total Revenue</th>
+                        <th class="text-center">Orders</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sortedItems.map(([itemName, data]) => `
+                        <tr>
+                            <td><strong>${itemName}</strong></td>
+                            <td class="text-center">${data.quantity}</td>
+                            <td class="text-right">â‚¹${data.averagePrice.toFixed(2)}</td>
+                            <td class="text-right"><strong>â‚¹${data.revenue.toFixed(2)}</strong></td>
+                            <td class="text-center">${data.orders}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td><strong>Grand Total</strong></td>
+                        <td class="text-center"><strong>${totalQuantity}</strong></td>
+                        <td class="text-right">-</td>
+                        <td class="text-right"><strong>â‚¹${totalRevenue.toFixed(2)}</strong></td>
+                        <td class="text-center"><strong>${totalOrders}</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+            ${sortedItems.map(([itemName, data]) => {
+                const dailyData = itemDailySales[itemName] || {};
+                const sortedDates = Object.keys(dailyData).sort();
+                
+                if (sortedDates.length === 0) return '';
+                
+                return `
+                    <div style="margin-top: 30px; page-break-inside: avoid;">
+                        <h4 style="margin-bottom: 10px; color: #333;">${itemName} - Daily Sales</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th class="text-center">Quantity</th>
+                                    <th class="text-right">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sortedDates.map(dateKey => {
+                                    const dateObj = new Date(dateKey);
+                                    const dateFormatted = dateObj.toLocaleDateString();
+                                    const dayData = dailyData[dateKey];
+                                    return `
+                                        <tr>
+                                            <td>${dateFormatted}</td>
+                                            <td class="text-center">${dayData.quantity}</td>
+                                            <td class="text-right"><strong>â‚¹${dayData.revenue.toFixed(2)}</strong></td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td><strong>Total for ${itemName}</strong></td>
+                                    <td class="text-center"><strong>${data.quantity}</strong></td>
+                                    <td class="text-right"><strong>â‚¹${data.revenue.toFixed(2)}</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                `;
+            }).join('')}
+            <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
+                <p>Generated on: ${new Date().toLocaleString()}</p>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    // Open in new window and print
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(pdfContent);
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    setTimeout(() => {
+        printWindow.print();
+    }, 250);
+}
+
+function exportItemWiseReportToCSV() {
+    if (!currentItemWiseReportData) {
+        alert('No item-wise report data available. Please generate a report first.');
+        return;
+    }
+    
+    // Get restaurant info for header
+    const restaurantInfo = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESTAURANT_INFO) || '{}');
+    const restaurantName = restaurantInfo.name || 'Restaurant';
+    
+    const { sortedItems, itemDailySales, startDateFormatted, endDateFormatted, totalRevenue, totalQuantity, totalOrders } = currentItemWiseReportData;
+    
+    // Create CSV content
+    let csvContent = '\uFEFF'; // BOM for UTF-8
+    
+    // Header
+    csvContent += `${restaurantName}\n`;
+    csvContent += `Item-Wise Sales Report\n`;
+    csvContent += `${startDateFormatted} to ${endDateFormatted}\n`;
+    csvContent += `\n`;
+    csvContent += `Total Orders,${totalOrders}\n`;
+    csvContent += `Total Items Sold,${totalQuantity}\n`;
+    csvContent += `Total Revenue,â‚¹${totalRevenue.toFixed(2)}\n`;
+    csvContent += `\n`;
+    
+    // Item Summary Section
+    csvContent += `ITEM SUMMARY\n`;
+    csvContent += `Item Name,Quantity Sold,Average Price,Total Revenue,Orders\n`;
+    
+    sortedItems.forEach(([itemName, data]) => {
+        csvContent += `"${itemName}",${data.quantity},â‚¹${data.averagePrice.toFixed(2)},â‚¹${data.revenue.toFixed(2)},${data.orders}\n`;
+    });
+    
+    // Grand Total
+    csvContent += `Grand Total,${totalQuantity},,â‚¹${totalRevenue.toFixed(2)},${totalOrders}\n`;
+    csvContent += `\n`;
+    
+    // Daily Breakdown Section
+    csvContent += `DAILY BREAKDOWN BY ITEM\n`;
+    csvContent += `\n`;
+    
+    sortedItems.forEach(([itemName, data]) => {
+        const dailyData = itemDailySales[itemName] || {};
+        const sortedDates = Object.keys(dailyData).sort();
+        
+        if (sortedDates.length === 0) return;
+        
+        csvContent += `${itemName} - Daily Sales\n`;
+        csvContent += `Date,Quantity,Revenue\n`;
+        
+        sortedDates.forEach(dateKey => {
+            const dateObj = new Date(dateKey);
+            const dateFormatted = dateObj.toLocaleDateString();
+            const dayData = dailyData[dateKey];
+            csvContent += `"${dateFormatted}",${dayData.quantity},â‚¹${dayData.revenue.toFixed(2)}\n`;
+        });
+        
+        csvContent += `Total for ${itemName},${data.quantity},â‚¹${data.revenue.toFixed(2)}\n`;
+        csvContent += `\n`;
+    });
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    const fileName = `Item_Wise_Report_${startDateFormatted.replace(/\//g, '-')}_to_${endDateFormatted.replace(/\//g, '-')}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function searchOrder() {
+    const orderNumber = document.getElementById('orderSearchInput').value.trim();
+    
+    if (!orderNumber) {
+        alert('Please enter an order number!');
+        return;
+    }
+    
+    // Hide preview section when searching
+    document.getElementById('reportPreviewSection').classList.add('hidden');
+    
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const order = orders.find(o => o.id.toString() === orderNumber || o.id.toString().includes(orderNumber));
+    
+    const reportContent = document.getElementById('salesReportContent');
+    reportContent.innerHTML = '';
+    
+    if (!order) {
+        reportContent.innerHTML = '<p style="text-align: center; color: #999;">Order not found.</p>';
+        return;
+    }
+    
+    // Display order details
+    const orderDiv = document.createElement('div');
+    orderDiv.className = 'order-details';
+    const orderDate = new Date(order.date).toLocaleString();
+    
+    let itemsHtml = '';
+    order.items.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        itemsHtml += `
+            <tr>
+                <td>${item.name}</td>
+                <td>${item.quantity}</td>
+                <td>â‚¹${item.price.toFixed(2)}</td>
+                <td>â‚¹${itemTotal.toFixed(2)}</td>
+            </tr>
+        `;
+    });
+    
+    orderDiv.innerHTML = `
+        <h3>Order #${order.id}</h3>
+        <p><strong>Date:</strong> ${orderDate}</p>
+        <p><strong>Total:</strong> â‚¹${order.total.toFixed(2)}</p>
+        <table style="width: 100%; margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${itemsHtml}
+            </tbody>
+        </table>
+        <button onclick="reprintOrder(${order.id})" class="btn btn-primary" style="margin-top: 15px;">Reprint Order</button>
+    `;
+    reportContent.appendChild(orderDiv);
+}
+
+function reprintOrder(orderId) {
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const order = orders.find(o => o.id === orderId);
+    
+    if (!order) {
+        alert('Order not found!');
+        return;
+    }
+    
+    const printBillDiv = document.getElementById('printBill');
+    const billItemsBody = document.getElementById('billItemsBody');
+    const billTotal = document.getElementById('billTotal');
+    const billDate = document.getElementById('billDate');
+    const billOrderNumber = document.getElementById('billOrderNumber');
+    
+    // Set order number and date
+    if (billOrderNumber) {
+        billOrderNumber.textContent = order.id;
+    }
+    billDate.textContent = new Date(order.date).toLocaleString();
+    
+    // Clear and populate bill items
+    billItemsBody.innerHTML = '';
+    let total = 0;
+    
+    order.items.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        total += itemTotal;
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.name}</td>
+            <td>${item.quantity}</td>
+            <td>â‚¹${item.price.toFixed(2)}</td>
+            <td>â‚¹${itemTotal.toFixed(2)}</td>
+        `;
+        billItemsBody.appendChild(row);
+    });
+    
+    billTotal.textContent = total.toFixed(2);
+    
+    // Show print bill and print
+    printBillDiv.classList.remove('hidden');
+    window.print();
+    printBillDiv.classList.add('hidden');
+}
+
+function loadCancelledBills() {
+    const cancelledBillsContent = document.getElementById('cancelledBillsContent');
+    if (!cancelledBillsContent) return;
+    
+    const cancelledOrders = JSON.parse(localStorage.getItem(STORAGE_KEYS.CANCELLED_ORDERS) || '[]');
+    
+    if (cancelledOrders.length === 0) {
+        cancelledBillsContent.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No cancelled bills found.</p>';
+        return;
+    }
+    
+    // Sort by cancelled date (newest first)
+    const sortedCancelledOrders = cancelledOrders.sort((a, b) => {
+        const dateA = a.cancelledDate ? new Date(a.cancelledDate) : new Date(a.date);
+        const dateB = b.cancelledDate ? new Date(b.cancelledDate) : new Date(b.date);
+        return dateB - dateA;
+    });
+    
+    cancelledBillsContent.innerHTML = '';
+    
+    sortedCancelledOrders.forEach(order => {
+        const orderDiv = document.createElement('div');
+        orderDiv.className = 'transaction-item cancelled-item';
+        orderDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: #ffebee; border: 1px solid #ef5350; border-radius: 5px; cursor: pointer; transition: all 0.3s ease;';
+        orderDiv.onmouseover = function() {
+            this.style.background = '#ffcdd2';
+            this.style.borderColor = '#e53935';
+        };
+        orderDiv.onmouseout = function() {
+            this.style.background = '#ffebee';
+            this.style.borderColor = '#ef5350';
+        };
+        
+        const orderDate = new Date(order.date).toLocaleString();
+        const cancelledDate = order.cancelledDate ? new Date(order.cancelledDate).toLocaleString() : 'N/A';
+        const cancelledBy = order.cancelledBy || 'Admin';
+        const paymentMethod = order.paymentMethod || 'N/A';
+        const paymentMethodLabel = paymentMethod === 'gpay' ? 'GPay' : paymentMethod === 'cash' ? 'Cash' : paymentMethod;
+        
+        orderDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div>
+                    <strong style="font-size: 16px; color: #c62828;">Order #${order.id} (Cancelled)</strong>
+                    <div style="font-size: 12px; color: #666; margin-top: 3px;">Original: ${orderDate}</div>
+                    <div style="font-size: 12px; color: #d32f2f; margin-top: 3px;">Cancelled: ${cancelledDate} by ${cancelledBy}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 18px; font-weight: bold; color: #d32f2f;">â‚¹${order.total.toFixed(2)}</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 3px;">${paymentMethodLabel}</div>
+                </div>
+            </div>
+            <div style="font-size: 13px; color: #666; border-top: 1px solid #ffcdd2; padding-top: 8px; margin-top: 8px;">
+                ${order.items.length} item(s): ${order.items.map(item => `${item.name} (${item.quantity}x)`).join(', ')}
+            </div>
+        `;
+        
+        cancelledBillsContent.appendChild(orderDiv);
+    });
+}
+
+function loadTransactionHistory() {
+    const orders = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORDERS) || '[]');
+    const historyContent = document.getElementById('transactionHistoryContent');
+    
+    if (orders.length === 0) {
+        historyContent.innerHTML = '<p style="text-align: center; color: #999;">No transactions found.</p>';
+        return;
+    }
+    
+    // Sort orders by date (newest first)
+    const sortedOrders = [...orders].sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    historyContent.innerHTML = '';
+    
+    sortedOrders.forEach(order => {
+        const orderDiv = document.createElement('div');
+        orderDiv.className = 'transaction-item';
+        const orderDate = new Date(order.date).toLocaleString();
+        
+        orderDiv.innerHTML = `
+            <div class="transaction-header">
+                <div>
+                    <strong>Order #${order.id}</strong>
+                    <span style="color: #666; margin-left: 10px;">${orderDate}</span>
+                </div>
+                <div>
+                    <strong>â‚¹${order.total.toFixed(2)}</strong>
+                    <button onclick="reprintOrder(${order.id})" class="btn btn-secondary" style="margin-left: 10px; padding: 5px 10px;">Reprint</button>
+                </div>
+            </div>
+            <div class="transaction-items">
+                ${order.items.map(item => `${item.name} (${item.quantity}x)`).join(', ')}
+            </div>
+        `;
+        historyContent.appendChild(orderDiv);
+    });
+}
+
+// Make functions globally accessible for onclick handlers
+window.addToCart = addToCart;
+window.updateQuantity = updateQuantity;
+window.removeFromCart = removeFromCart;
+window.editUser = editUser;
+window.deleteUser = deleteUser;
+window.viewCancelBillDetails = viewCancelBillDetails;
+window.cancelBillFromList = cancelBillFromList;
+window.editMenuItem = editMenuItem;
+window.deleteMenuItem = deleteMenuItem;
+window.reprintOrder = reprintOrder;
+
