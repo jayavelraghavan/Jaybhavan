@@ -1,13 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const db = require('../database/db');
+const { ObjectId } = require('mongodb');
+const { getDB } = require('../database/db');
 
 // Login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
     try {
+        const db = getDB();
         const { username, password } = req.body;
-        const user = db.get('users').find({ username }).value();
+        const user = await db.collection('users').findOne({ username });
 
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -32,9 +34,10 @@ router.post('/login', (req, res) => {
 });
 
 // Get all users
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        const users = db.get('users').value().map(({ password, ...user }) => user);
+        const db = getDB();
+        const users = await db.collection('users').find({}).project({ password: 0 }).toArray();
         res.json(users);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -42,28 +45,35 @@ router.get('/', (req, res) => {
 });
 
 // Get user by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const user = db.get('users').find({ id: parseInt(req.params.id) }).value();
+        const db = getDB();
+        let user;
+        
+        if (ObjectId.isValid(req.params.id)) {
+            user = await db.collection('users').findOne({ _id: new ObjectId(req.params.id) }, { projection: { password: 0 } });
+        }
+        
+        if (!user) {
+            user = await db.collection('users').findOne({ id: parseInt(req.params.id) }, { projection: { password: 0 } });
+        }
+        
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        const { password, ...userWithoutPassword } = user;
-        res.json(userWithoutPassword);
+        res.json(user);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
 // Create new user
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
+        const db = getDB();
         const { username, password, role, cashierCode, employeeId } = req.body;
-        const users = db.get('users').value();
-        const maxId = users.length > 0 ? Math.max(...users.map(u => u.id || 0)) : 0;
-        const newId = maxId + 1;
 
-        const existingUser = db.get('users').find({ username }).value();
+        const existingUser = await db.collection('users').findOne({ username });
         if (existingUser) {
             return res.status(400).json({ error: 'Username already exists' });
         }
@@ -71,41 +81,51 @@ router.post('/', (req, res) => {
         const hashedPassword = password ? bcrypt.hashSync(password, 10) : '';
 
         const newUser = {
-            id: newId,
             username,
             password: hashedPassword,
             role: role || 'user',
             cashier_code: cashierCode || '',
             employee_id: employeeId || null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            created_at: new Date(),
+            updated_at: new Date()
         };
 
-        db.get('users').push(newUser).write();
-        res.json({ id: newId, message: 'User created successfully' });
+        const result = await db.collection('users').insertOne(newUser);
+        res.json({ id: result.insertedId, message: 'User created successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
 // Update user
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
-        const user = db.get('users').find({ id: parseInt(req.params.id) });
-        if (!user.value()) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
+        const db = getDB();
         const updateData = {
             ...req.body,
-            updated_at: new Date().toISOString()
+            updated_at: new Date()
         };
 
         if (req.body.password) {
             updateData.password = bcrypt.hashSync(req.body.password, 10);
         }
 
-        user.assign(updateData).write();
+        let result;
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('users').updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: updateData }
+            );
+        } else {
+            result = await db.collection('users').updateOne(
+                { id: parseInt(req.params.id) },
+                { $set: updateData }
+            );
+        }
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
         res.json({ message: 'User updated successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -113,14 +133,20 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete user
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
-        const user = db.get('users').find({ id: parseInt(req.params.id) });
-        if (!user.value()) {
-            return res.status(404).json({ error: 'User not found' });
+        const db = getDB();
+        let result;
+        
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('users').deleteOne({ _id: new ObjectId(req.params.id) });
+        } else {
+            result = await db.collection('users').deleteOne({ id: parseInt(req.params.id) });
         }
 
-        db.get('users').remove({ id: parseInt(req.params.id) }).write();
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -128,19 +154,27 @@ router.delete('/:id', (req, res) => {
 });
 
 // Reset password
-router.post('/:id/reset-password', (req, res) => {
+router.post('/:id/reset-password', async (req, res) => {
     try {
-        const user = db.get('users').find({ id: parseInt(req.params.id) });
-        if (!user.value()) {
-            return res.status(404).json({ error: 'User not found' });
+        const db = getDB();
+        const hashedPassword = bcrypt.hashSync(req.body.newPassword, 10);
+        
+        let result;
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('users').updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { password: hashedPassword, updated_at: new Date() } }
+            );
+        } else {
+            result = await db.collection('users').updateOne(
+                { id: parseInt(req.params.id) },
+                { $set: { password: hashedPassword, updated_at: new Date() } }
+            );
         }
 
-        const hashedPassword = bcrypt.hashSync(req.body.newPassword, 10);
-        user.assign({
-            password: hashedPassword,
-            updated_at: new Date().toISOString()
-        }).write();
-
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
         res.json({ message: 'Password reset successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });

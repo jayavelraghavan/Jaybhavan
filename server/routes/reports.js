@@ -1,25 +1,31 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
+const { ObjectId } = require('mongodb');
+const { getDB } = require('../database/db');
 
 // Date range report
-router.get('/date-range', (req, res) => {
+router.get('/date-range', async (req, res) => {
     try {
+        const db = getDB();
         const { startDate, endDate } = req.query;
 
         if (!startDate || !endDate) {
             return res.status(400).json({ error: 'Start date and end date are required' });
         }
 
-        const orders = db.get('orders')
-            .filter(o => {
-                const orderDate = new Date(o.created_at).toISOString().split('T')[0];
-                return orderDate >= startDate && orderDate <= endDate && o.status === 'completed';
-            })
-            .value();
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
 
-        const orderIds = orders.map(o => o.id);
-        const items = db.get('order_items').filter(item => orderIds.includes(item.order_id)).value();
+        const orders = await db.collection('orders').find({
+            created_at: { $gte: start, $lte: end },
+            status: 'completed'
+        }).sort({ created_at: -1 }).toArray();
+
+        const orderIds = orders.map(o => o._id || o.id);
+        const items = await db.collection('order_items').find({
+            order_id: { $in: orderIds }
+        }).toArray();
 
         // Calculate item sales
         const itemSales = {};
@@ -49,24 +55,32 @@ router.get('/date-range', (req, res) => {
 });
 
 // User-wise report
-router.get('/user-wise', (req, res) => {
+router.get('/user-wise', async (req, res) => {
     try {
+        const db = getDB();
         const { startDate, endDate } = req.query;
 
         if (!startDate || !endDate) {
             return res.status(400).json({ error: 'Start date and end date are required' });
         }
 
-        const users = db.get('users').value();
-        const orders = db.get('orders')
-            .filter(o => {
-                const orderDate = new Date(o.created_at).toISOString().split('T')[0];
-                return orderDate >= startDate && orderDate <= endDate && o.status === 'completed';
-            })
-            .value();
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        const users = await db.collection('users').find({}).toArray();
+        const orders = await db.collection('orders').find({
+            created_at: { $gte: start, $lte: end },
+            status: 'completed'
+        }).toArray();
 
         const result = users.map(user => {
-            const userOrders = orders.filter(o => o.user_id === user.id);
+            const userOrders = orders.filter(o => {
+                if (o.user_id && user._id) {
+                    return o.user_id.toString() === user._id.toString();
+                }
+                return o.user_id === user.id;
+            });
             return {
                 username: user.username,
                 cashier_code: user.cashier_code,
@@ -83,23 +97,28 @@ router.get('/user-wise', (req, res) => {
 });
 
 // Item-wise report
-router.get('/item-wise', (req, res) => {
+router.get('/item-wise', async (req, res) => {
     try {
+        const db = getDB();
         const { startDate, endDate } = req.query;
 
         if (!startDate || !endDate) {
             return res.status(400).json({ error: 'Start date and end date are required' });
         }
 
-        const orders = db.get('orders')
-            .filter(o => {
-                const orderDate = new Date(o.created_at).toISOString().split('T')[0];
-                return orderDate >= startDate && orderDate <= endDate && o.status === 'completed';
-            })
-            .value();
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
 
-        const orderIds = orders.map(o => o.id);
-        const items = db.get('order_items').filter(item => orderIds.includes(item.order_id)).value();
+        const orders = await db.collection('orders').find({
+            created_at: { $gte: start, $lte: end },
+            status: 'completed'
+        }).toArray();
+
+        const orderIds = orders.map(o => o._id || o.id);
+        const items = await db.collection('order_items').find({
+            order_id: { $in: orderIds }
+        }).toArray();
 
         const itemSales = {};
         items.forEach(item => {
@@ -124,18 +143,23 @@ router.get('/item-wise', (req, res) => {
 });
 
 // Transaction history
-router.get('/transactions', (req, res) => {
+router.get('/transactions', async (req, res) => {
     try {
+        const db = getDB();
         const limit = parseInt(req.query.limit) || 100;
-        const orders = db.get('orders')
-            .filter({ status: 'completed' })
-            .value()
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-            .slice(0, limit);
+        const orders = await db.collection('orders').find({ status: 'completed' })
+            .sort({ created_at: -1 })
+            .limit(limit)
+            .toArray();
 
-        const users = db.get('users').value();
+        const users = await db.collection('users').find({}).toArray();
         const result = orders.map(order => {
-            const user = users.find(u => u.id === order.user_id);
+            const user = users.find(u => {
+                if (order.user_id && u._id) {
+                    return order.user_id.toString() === u._id.toString();
+                }
+                return order.user_id === u.id;
+            });
             return {
                 ...order,
                 username: user ? user.username : null,

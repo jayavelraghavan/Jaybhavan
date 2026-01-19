@@ -1,24 +1,32 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
+const { ObjectId } = require('mongodb');
+const { getDB } = require('../database/db');
 
 // Get all orders
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        let orders = db.get('orders').value();
+        const db = getDB();
         const { startDate, endDate, status } = req.query;
+        const query = {};
 
-        if (startDate) {
-            orders = orders.filter(o => new Date(o.created_at).toISOString().split('T')[0] >= startDate);
+        if (startDate || endDate) {
+            query.created_at = {};
+            if (startDate) {
+                query.created_at.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.created_at.$lte = end;
+            }
         }
-        if (endDate) {
-            orders = orders.filter(o => new Date(o.created_at).toISOString().split('T')[0] <= endDate);
-        }
+
         if (status) {
-            orders = orders.filter(o => o.status === status);
+            query.status = status;
         }
 
-        orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const orders = await db.collection('orders').find(query).sort({ created_at: -1 }).toArray();
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -26,14 +34,27 @@ router.get('/', (req, res) => {
 });
 
 // Get order by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const order = db.get('orders').find({ id: parseInt(req.params.id) }).value();
+        const db = getDB();
+        let order;
+        
+        if (ObjectId.isValid(req.params.id)) {
+            order = await db.collection('orders').findOne({ _id: new ObjectId(req.params.id) });
+        }
+        
+        if (!order) {
+            order = await db.collection('orders').findOne({ id: parseInt(req.params.id) });
+        }
+        
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        const items = db.get('order_items').filter({ order_id: parseInt(req.params.id) }).value();
+        const items = await db.collection('order_items').find({ 
+            order_id: order._id || order.id 
+        }).toArray();
+        
         res.json({ ...order, items });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -41,14 +62,18 @@ router.get('/:id', (req, res) => {
 });
 
 // Get order by order number
-router.get('/number/:orderNumber', (req, res) => {
+router.get('/number/:orderNumber', async (req, res) => {
     try {
-        const order = db.get('orders').find({ order_number: req.params.orderNumber }).value();
+        const db = getDB();
+        const order = await db.collection('orders').findOne({ order_number: req.params.orderNumber });
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        const items = db.get('order_items').filter({ order_id: order.id }).value();
+        const items = await db.collection('order_items').find({ 
+            order_id: order._id || order.id 
+        }).toArray();
+        
         res.json({ ...order, items });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -56,19 +81,15 @@ router.get('/number/:orderNumber', (req, res) => {
 });
 
 // Create new order
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
+        const db = getDB();
         const {
             orderNumber, customerName, cashierCode, userId,
             items, subtotal, cgst, sgst, totalTax, total, paymentMethod
         } = req.body;
 
-        const orders = db.get('orders').value();
-        const maxId = orders.length > 0 ? Math.max(...orders.map(o => o.id || 0)) : 0;
-        const orderId = maxId + 1;
-
         const newOrder = {
-            id: orderId,
             order_number: orderNumber,
             customer_name: customerName,
             cashier_code: cashierCode,
@@ -80,19 +101,15 @@ router.post('/', (req, res) => {
             total,
             payment_method: paymentMethod,
             status: 'completed',
-            created_at: new Date().toISOString()
+            created_at: new Date()
         };
 
-        db.get('orders').push(newOrder).write();
+        const orderResult = await db.collection('orders').insertOne(newOrder);
+        const orderId = orderResult.insertedId;
 
-        // Insert order items
-        const orderItems = db.get('order_items').value();
-        const maxItemId = orderItems.length > 0 ? Math.max(...orderItems.map(i => i.id || 0)) : 0;
-        let nextItemId = maxItemId + 1;
-
-        items.forEach(item => {
+        // Insert order items and update stock
+        for (const item of items) {
             const orderItem = {
-                id: nextItemId++,
                 order_id: orderId,
                 menu_item_id: item.menuItemId,
                 item_name: item.itemName,
@@ -104,19 +121,16 @@ router.post('/', (req, res) => {
                 total_tax: item.totalTax || 0,
                 total: item.total
             };
-            db.get('order_items').push(orderItem).write();
+            await db.collection('order_items').insertOne(orderItem);
 
             // Update stock if item is stock item
             if (item.isStockItem === 'yes') {
-                const menuItem = db.get('menu_items').find({ id: item.menuItemId });
-                if (menuItem.value()) {
-                    menuItem.assign({
-                        stock_value: (menuItem.value().stock_value || 0) - item.quantity,
-                        updated_at: new Date().toISOString()
-                    }).write();
-                }
+                await db.collection('menu_items').updateOne(
+                    { _id: new ObjectId(item.menuItemId) },
+                    { $inc: { stock_value: -item.quantity }, $set: { updated_at: new Date() } }
+                );
             }
-        });
+        }
 
         res.json({ id: orderId, orderNumber, message: 'Order created successfully' });
     } catch (error) {
@@ -125,41 +139,48 @@ router.post('/', (req, res) => {
 });
 
 // Cancel order
-router.post('/:id/cancel', (req, res) => {
+router.post('/:id/cancel', async (req, res) => {
     try {
-        const order = db.get('orders').find({ id: parseInt(req.params.id) }).value();
+        const db = getDB();
+        let order;
+        
+        if (ObjectId.isValid(req.params.id)) {
+            order = await db.collection('orders').findOne({ _id: new ObjectId(req.params.id) });
+        } else {
+            order = await db.collection('orders').findOne({ id: parseInt(req.params.id) });
+        }
+        
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
 
         // Get order items to restore stock
-        const items = db.get('order_items').filter({ order_id: parseInt(req.params.id) }).value();
+        const items = await db.collection('order_items').find({ 
+            order_id: order._id || order.id 
+        }).toArray();
 
         // Restore stock
-        items.forEach(item => {
-            const menuItem = db.get('menu_items').find({ id: item.menu_item_id });
-            if (menuItem.value()) {
-                menuItem.assign({
-                    stock_value: (menuItem.value().stock_value || 0) + item.quantity,
-                    updated_at: new Date().toISOString()
-                }).write();
-            }
-        });
+        for (const item of items) {
+            await db.collection('menu_items').updateOne(
+                { _id: new ObjectId(item.menu_item_id) },
+                { $inc: { stock_value: item.quantity }, $set: { updated_at: new Date() } }
+            );
+        }
 
         // Update order status
-        db.get('orders').find({ id: parseInt(req.params.id) }).assign({ status: 'cancelled' }).write();
+        await db.collection('orders').updateOne(
+            { _id: order._id || { id: order.id } },
+            { $set: { status: 'cancelled' } }
+        );
 
         // Insert into cancelled_orders
-        const cancelledOrders = db.get('cancelled_orders').value();
-        const maxId = cancelledOrders.length > 0 ? Math.max(...cancelledOrders.map(o => o.id || 0)) : 0;
-        db.get('cancelled_orders').push({
-            id: maxId + 1,
-            original_order_id: parseInt(req.params.id),
+        await db.collection('cancelled_orders').insertOne({
+            original_order_id: order._id || order.id,
             order_number: order.order_number,
             cancelled_by: req.body.cancelledBy,
             cancellation_reason: req.body.reason,
-            cancelled_at: new Date().toISOString()
-        }).write();
+            cancelled_at: new Date()
+        });
 
         res.json({ message: 'Order cancelled successfully' });
     } catch (error) {
@@ -168,13 +189,17 @@ router.post('/:id/cancel', (req, res) => {
 });
 
 // Get cancelled orders
-router.get('/cancelled/all', (req, res) => {
+router.get('/cancelled/all', async (req, res) => {
     try {
-        const cancelled = db.get('cancelled_orders').value();
-        const orders = db.get('orders').value();
+        const db = getDB();
+        const cancelled = await db.collection('cancelled_orders').find({}).toArray();
+        const orders = await db.collection('orders').find({}).toArray();
         
         const result = cancelled.map(co => {
-            const order = orders.find(o => o.id === co.original_order_id);
+            const order = orders.find(o => 
+                (o._id && co.original_order_id && o._id.toString() === co.original_order_id.toString()) ||
+                (o.id === co.original_order_id)
+            );
             return { ...co, ...order };
         });
 

@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
+const { getDB } = require('../database/db');
 
 // Get restaurant info
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        const info = db.get('restaurant_info').value();
-        if (!info || Object.keys(info).length === 0) {
+        const db = getDB();
+        const info = await db.collection('restaurant_info').findOne({});
+        
+        if (!info) {
             return res.json({
                 name: '',
                 address: '',
@@ -29,12 +31,20 @@ router.get('/', (req, res) => {
 });
 
 // Update restaurant info
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
     try {
-        db.set('restaurant_info', {
+        const db = getDB();
+        const updateData = {
             ...req.body,
-            updated_at: new Date().toISOString()
-        }).write();
+            updated_at: new Date()
+        };
+        
+        await db.collection('restaurant_info').updateOne(
+            {},
+            { $set: updateData },
+            { upsert: true }
+        );
+        
         res.json({ message: 'Restaurant info updated successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });

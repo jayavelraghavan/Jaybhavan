@@ -1,21 +1,24 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
+const { ObjectId } = require('mongodb');
+const { getDB } = require('../database/db');
 
 // Get all stock items
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        let items = db.get('menu_items').filter({ stock_item: 'yes' }).value();
+        const db = getDB();
         const { search, filter } = req.query;
+        let query = { stock_item: 'yes' };
 
         if (search) {
-            const searchLower = search.toLowerCase();
-            items = items.filter(item => 
-                item.name.toLowerCase().includes(searchLower) ||
-                (item.item_code && item.item_code.toLowerCase().includes(searchLower)) ||
-                (item.barcode && item.barcode.includes(search))
-            );
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { item_code: { $regex: search, $options: 'i' } },
+                { barcode: { $regex: search, $options: 'i' } }
+            ];
         }
+
+        let items = await db.collection('menu_items').find(query).sort({ name: 1 }).toArray();
 
         if (filter && filter !== 'all') {
             if (filter === 'red') {
@@ -27,7 +30,6 @@ router.get('/', (req, res) => {
             }
         }
 
-        items.sort((a, b) => a.name.localeCompare(b.name));
         res.json(items);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -35,19 +37,17 @@ router.get('/', (req, res) => {
 });
 
 // Update stock for multiple items (bulk update)
-router.post('/bulk-update', (req, res) => {
+router.post('/bulk-update', async (req, res) => {
     try {
+        const db = getDB();
         const { updates } = req.body;
 
-        updates.forEach(update => {
-            const item = db.get('menu_items').find({ id: update.id });
-            if (item.value()) {
-                item.assign({
-                    stock_value: update.stockValue,
-                    updated_at: new Date().toISOString()
-                }).write();
-            }
-        });
+        for (const update of updates) {
+            await db.collection('menu_items').updateOne(
+                { _id: new ObjectId(update.id) },
+                { $set: { stock_value: update.stockValue, updated_at: new Date() } }
+            );
+        }
 
         res.json({ message: 'Stock updated successfully' });
     } catch (error) {

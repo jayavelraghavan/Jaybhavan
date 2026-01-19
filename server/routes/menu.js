@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
+const { ObjectId } = require('mongodb');
+const { getDB } = require('../database/db');
 
 // Get all menu items
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        const items = db.get('menu_items').value();
+        const db = getDB();
+        const items = await db.collection('menu_items').find({}).sort({ id: 1 }).toArray();
         res.json(items);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -13,9 +15,21 @@ router.get('/', (req, res) => {
 });
 
 // Get menu item by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const item = db.get('menu_items').find({ id: parseInt(req.params.id) }).value();
+        const db = getDB();
+        let item;
+        
+        // Try ObjectId first
+        if (ObjectId.isValid(req.params.id)) {
+            item = await db.collection('menu_items').findOne({ _id: new ObjectId(req.params.id) });
+        }
+        
+        // If not found, try numeric ID
+        if (!item) {
+            item = await db.collection('menu_items').findOne({ id: parseInt(req.params.id) });
+        }
+        
         if (!item) {
             return res.status(404).json({ error: 'Menu item not found' });
         }
@@ -26,9 +40,10 @@ router.get('/:id', (req, res) => {
 });
 
 // Get menu item by barcode
-router.get('/barcode/:barcode', (req, res) => {
+router.get('/barcode/:barcode', async (req, res) => {
     try {
-        const item = db.get('menu_items').find({ barcode: req.params.barcode }).value();
+        const db = getDB();
+        const item = await db.collection('menu_items').findOne({ barcode: req.params.barcode });
         if (!item) {
             return res.status(404).json({ error: 'Menu item not found' });
         }
@@ -39,39 +54,46 @@ router.get('/barcode/:barcode', (req, res) => {
 });
 
 // Create new menu item
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
-        const items = db.get('menu_items').value();
-        const maxId = items.length > 0 ? Math.max(...items.map(i => i.id || 0)) : 0;
-        const newId = maxId + 1;
-
+        const db = getDB();
         const newItem = {
-            id: newId,
             ...req.body,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            created_at: new Date(),
+            updated_at: new Date()
         };
-
-        db.get('menu_items').push(newItem).write();
-        res.json({ id: newId, message: 'Menu item created successfully' });
+        const result = await db.collection('menu_items').insertOne(newItem);
+        res.json({ id: result.insertedId, message: 'Menu item created successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
 // Update menu item
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
-        const item = db.get('menu_items').find({ id: parseInt(req.params.id) });
-        if (!item.value()) {
+        const db = getDB();
+        const updateData = {
+            ...req.body,
+            updated_at: new Date()
+        };
+        
+        let result;
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('menu_items').updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: updateData }
+            );
+        } else {
+            result = await db.collection('menu_items').updateOne(
+                { id: parseInt(req.params.id) },
+                { $set: updateData }
+            );
+        }
+        
+        if (result.matchedCount === 0) {
             return res.status(404).json({ error: 'Menu item not found' });
         }
-
-        item.assign({
-            ...req.body,
-            updated_at: new Date().toISOString()
-        }).write();
-
         res.json({ message: 'Menu item updated successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -79,14 +101,20 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete menu item
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
-        const item = db.get('menu_items').find({ id: parseInt(req.params.id) });
-        if (!item.value()) {
+        const db = getDB();
+        let result;
+        
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('menu_items').deleteOne({ _id: new ObjectId(req.params.id) });
+        } else {
+            result = await db.collection('menu_items').deleteOne({ id: parseInt(req.params.id) });
+        }
+        
+        if (result.deletedCount === 0) {
             return res.status(404).json({ error: 'Menu item not found' });
         }
-
-        db.get('menu_items').remove({ id: parseInt(req.params.id) }).write();
         res.json({ message: 'Menu item deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -94,18 +122,30 @@ router.delete('/:id', (req, res) => {
 });
 
 // Update stock for menu item
-router.patch('/:id/stock', (req, res) => {
+router.patch('/:id/stock', async (req, res) => {
     try {
-        const item = db.get('menu_items').find({ id: parseInt(req.params.id) });
-        if (!item.value()) {
+        const db = getDB();
+        const updateData = {
+            stock_value: req.body.stockValue,
+            updated_at: new Date()
+        };
+        
+        let result;
+        if (ObjectId.isValid(req.params.id)) {
+            result = await db.collection('menu_items').updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: updateData }
+            );
+        } else {
+            result = await db.collection('menu_items').updateOne(
+                { id: parseInt(req.params.id) },
+                { $set: updateData }
+            );
+        }
+        
+        if (result.matchedCount === 0) {
             return res.status(404).json({ error: 'Menu item not found' });
         }
-
-        item.assign({
-            stock_value: req.body.stockValue,
-            updated_at: new Date().toISOString()
-        }).write();
-
         res.json({ message: 'Stock updated successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
