@@ -11,7 +11,7 @@ A complete restaurant website with menu management, shopping cart, billing syste
 - **Bill Printing**: Print formatted bills
 - **Menu Management**: Password-protected CRUD operations for menu items
 - **Sales Reports**: Monthly sales reports with item-wise breakdown
-- **Data Persistence**: All data stored in browser LocalStorage
+- **Data Persistence**: Backend API with SQLite database (localStorage fallback available)
 
 ## Menu Items
 
@@ -22,15 +22,38 @@ The website comes pre-loaded with:
 - Vada - ₹25.00
 - Pongal - ₹35.00
 
-## Usage
+## Quick Start
+
+### Option 1: With Backend API (Recommended)
+
+1. **Start the backend server:**
+   ```bash
+   cd server
+   npm install
+   npm start
+   ```
+
+2. **Open the frontend:**
+   - Open `index.html` in a web browser, or
+   - Use a local web server (e.g., `python -m http.server 8000`)
+
+3. The frontend will automatically connect to the API.
+
+See [BACKEND_SETUP.md](BACKEND_SETUP.md) for detailed setup instructions.
+
+### Option 2: Standalone (localStorage only)
 
 1. Open `index.html` in a web browser
-2. Browse menu items and click "Add to Cart" to add items
-3. View cart and adjust quantities
-4. Click "Pay Now" to see QR code and confirm payment
-5. Click "Print Bill" to print the bill
-6. Click "Manage Menu" to add/edit/delete menu items (password: `admin`)
-7. Click "Sales Report" to view monthly sales
+2. The app will work with localStorage if the API is not available
+
+## Usage
+
+1. Browse menu items and click "Add to Cart" to add items
+2. View cart and adjust quantities
+3. Click "Pay Now" to see QR code and confirm payment
+4. Click "Print Bill" to print the bill
+5. Click "Manage Menu" to add/edit/delete menu items (password: `admin`)
+6. Click "Sales Report" to view monthly sales
 
 ## Menu Management
 
@@ -51,11 +74,11 @@ Replace placeholder images in the `images/` folder with your actual food images:
 
 ## Technologies
 
-- HTML5
-- CSS3
-- Vanilla JavaScript
-- LocalStorage API
-- Electron (for Windows desktop app)
+- **Frontend**: HTML5, CSS3, Vanilla JavaScript
+- **Backend**: Node.js, Express.js
+- **Database**: SQLite
+- **Storage**: Backend API (with localStorage fallback)
+- **Desktop**: Electron (for Windows desktop app)
 
 ## Platforms
 
@@ -84,6 +107,10 @@ For detailed Windows build instructions, see [WINDOWS_BUILD_INSTRUCTIONS.md](WIN
 The application can also be built as an Android APK using Capacitor.
 
 For detailed Android build instructions, see [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)
+
+### Backend API Server
+
+The application now includes a full backend API server. See [BACKEND_SETUP.md](BACKEND_SETUP.md) for setup instructions.
 
 ## Browser Compatibility
 
