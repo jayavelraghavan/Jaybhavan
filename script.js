@@ -242,6 +242,17 @@ function setupEventListeners() {
         }
     });
     
+    // Header Fullscreen button
+    const headerFullscreenBtn = document.getElementById('headerFullscreenBtn');
+    if (headerFullscreenBtn) {
+        headerFullscreenBtn.addEventListener('click', toggleHeaderFullscreen);
+        // Listen for fullscreen changes to update button icon
+        document.addEventListener('fullscreenchange', handleHeaderFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleHeaderFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleHeaderFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleHeaderFullscreenChange);
+    }
+    
     // Login Modal
     document.getElementById('loginSubmitBtn').addEventListener('click', handleLogin);
     document.getElementById('closeLoginModal').addEventListener('click', () => {
@@ -5268,6 +5279,66 @@ function handleFullscreenChange() {
         fullscreenBtn.title = 'Exit Fullscreen';
     } else {
         modal.classList.remove('fullscreen');
+        fullscreenIcon.textContent = '⛶'; // Fullscreen enter icon
+        fullscreenBtn.title = 'Toggle Fullscreen';
+    }
+}
+
+// Header Fullscreen functionality
+function toggleHeaderFullscreen() {
+    if (!document.fullscreenElement && 
+        !document.webkitFullscreenElement && 
+        !document.mozFullScreenElement && 
+        !document.msFullscreenElement) {
+        // Enter fullscreen
+        enterHeaderFullscreen();
+    } else {
+        // Exit fullscreen
+        exitHeaderFullscreen();
+    }
+}
+
+function enterHeaderFullscreen() {
+    const element = document.documentElement;
+    if (element.requestFullscreen) {
+        element.requestFullscreen();
+    } else if (element.webkitRequestFullscreen) {
+        element.webkitRequestFullscreen();
+    } else if (element.mozRequestFullScreen) {
+        element.mozRequestFullScreen();
+    } else if (element.msRequestFullscreen) {
+        element.msRequestFullscreen();
+    }
+}
+
+function exitHeaderFullscreen() {
+    if (document.exitFullscreen) {
+        document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+    } else if (document.mozCancelFullScreen) {
+        document.mozCancelFullScreen();
+    } else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
+    }
+}
+
+function handleHeaderFullscreenChange() {
+    const fullscreenBtn = document.getElementById('headerFullscreenBtn');
+    if (!fullscreenBtn) return;
+    
+    const fullscreenIcon = fullscreenBtn.querySelector('.fullscreen-icon');
+    if (!fullscreenIcon) return;
+    
+    const isFullscreen = !!(document.fullscreenElement || 
+                           document.webkitFullscreenElement || 
+                           document.mozFullScreenElement || 
+                           document.msFullscreenElement);
+    
+    if (isFullscreen) {
+        fullscreenIcon.textContent = '⛶'; // Fullscreen exit icon (could use different icon)
+        fullscreenBtn.title = 'Exit Fullscreen';
+    } else {
         fullscreenIcon.textContent = '⛶'; // Fullscreen enter icon
         fullscreenBtn.title = 'Toggle Fullscreen';
     }

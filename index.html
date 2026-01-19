@@ -1138,6 +1138,20 @@
             border-bottom-left-radius: 8px;
             border-bottom-right-radius: 8px;
         }
+        
+        /* Fullscreen Header Button */
+        .fullscreen-header-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 40px;
+            padding: 10px;
+        }
+        
+        .fullscreen-header-btn .fullscreen-icon {
+            font-size: 18px;
+            line-height: 1;
+        }
     </style>
 </head>
 <body>
@@ -1158,6 +1172,9 @@
         </div>
         <nav>
             <button id="loginBtn" class="nav-btn">Login</button>
+            <button id="headerFullscreenBtn" class="nav-btn fullscreen-header-btn" title="Toggle Fullscreen">
+                <span class="fullscreen-icon">⛶</span>
+            </button>
             <div class="hamburger-menu-container">
                 <button id="hamburgerBtn" class="hamburger-btn" aria-label="Menu">
                     <span></span>
